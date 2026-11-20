@@ -1,5 +1,5 @@
 // CineMosaic window. Look and parts from MediaFiles Check (Theme, CheckButton, Dropdown, Switch). Texts in English in @tr().
-import { Palette, Spinner, Slider, ListView } from "std-widgets.slint";
+import { Palette, Spinner, ListView } from "std-widgets.slint";
 import "fonts/JetBrainsMono-Regular.ttf";
 import "fonts/JetBrainsMono-Medium.ttf";
 import "fonts/JetBrainsMono-SemiBold.ttf";
@@ -202,12 +202,64 @@ component Dropdown {
     }
 }
 
+// Presets: Dropdown look, but the menu lists the saved presets plus save / load / folder
+component PresetMenu {
+    in property <[string]> items;
+    in property <string> title;
+    callback chosen(int);
+    callback save();
+    callback load-file();
+    callback show-folder();
+    height: 26px;
+    min-width: row.preferred-width;
+    max-width: row.preferred-width;
+    horizontal-stretch: 0;
+    accessible-role: combobox;
+    accessible-label: @tr("Preset");
+    accessible-value: root.title;
+    accessible-action-default => { menu.show({ x: 0, y: root.height + 4px }); }
+    Rectangle {
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.line;
+        background: touch.pressed ? Theme.text.with-alpha(0.12) : touch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+    }
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        Text { text: root.title; font-size: 12px; vertical-alignment: center; color: Theme.text; }
+        VerticalLayout {
+            alignment: center;
+            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
+        }
+    }
+    menu := ContextMenuArea {
+        Menu {
+            for item[i] in root.items: MenuItem { title: item; activated => { root.chosen(i); } }
+            if root.items.length > 0: MenuSeparator {}
+            MenuItem { title: @tr("Save as preset…"); activated => { root.save(); } }
+            MenuItem { title: @tr("Load from file…"); activated => { root.load-file(); } }
+            MenuItem { title: @tr("Show presets folder"); activated => { root.show-folder(); } }
+        }
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { menu.show({ x: 0, y: root.height + 4px }); }
+        }
+    }
+}
+
 // Number with its unit; frame like Mountpoint's text fields, red when Rust could not read it
 component NumberField inherits Rectangle {
     in-out property <string> text;
     in property <string> unit;
     in property <string> label;
     in property <bool> invalid;
+    // dragging left / right in the field changes the value by `scrub` per pixel, rounded to `step` (0 = off);
+    // a click without dragging types as usual
+    in property <float> scrub: 0;
+    in property <float> step: 1;
+    in property <float> minimum: 0;
     callback edited();
     width: 96px;
     height: 26px;
@@ -234,6 +286,32 @@ component NumberField inherits Rectangle {
             color: Theme.faint;
             vertical-alignment: center;
             horizontal-stretch: 0;
+        }
+    }
+    if root.scrub > 0 && !input.has-focus: TouchArea {
+        property <float> v0;
+        property <bool> dragged;
+        mouse-cursor: ew-resize;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                self.v0 = root.text.is-float() ? root.text.to-float() : root.minimum;
+                self.dragged = false;
+            }
+            if e.kind == PointerEventKind.up && !self.dragged {
+                input.focus();
+                input.select-all();
+            }
+        }
+        moved => {
+            if self.pressed {
+                let d = (self.mouse-x - self.pressed-x) / 1px;
+                if Math.abs(d) > 2 { self.dragged = true; }
+                if self.dragged {
+                    let v = Math.round((self.v0 + d * root.scrub) / root.step) * root.step;
+                    root.text = Math.round(max(root.minimum, v) * 100) / 100;
+                    root.edited();
+                }
+            }
         }
     }
 }
@@ -1400,7 +1478,7 @@ export component AppWindow inherits SheetWindow {
     out property <length> smallest-width: 1000px;
     // what the side column needs; Rust lowers it to the screen on small displays
     in-out property <length> smallest-height: 820px;
-    preferred-width: 1180px;
+    preferred-width: 1573px;
     preferred-height: 920px;
     // app menu item, translated (Rust puts it into the macOS app menu)
     out property <string> txt-settings-menu: @tr("Settings…");
@@ -1479,6 +1557,14 @@ export component AppWindow inherits SheetWindow {
     // Rust renders a sharper preview once the zoom stops changing
     callback zoom-changed(float);
     in property <float> page-aspect: 210 / 297;
+    // presets: names in the presets folder, the one loaded or saved last, a line after save / load
+    in property <[string]> presets;
+    in property <string> preset-name;
+    in property <string> preset-status;
+    callback preset-chosen(int);
+    callback save-preset();
+    callback load-preset-file();
+    callback show-presets();
     // export
     in-out property <int> export-format: 3;
     in property <bool> exporting;
@@ -1625,7 +1711,7 @@ export component AppWindow inherits SheetWindow {
                     }
                     if root.picture == 8: Row {
                         text: @tr("Width : height");
-                        NumberField { text <=> root.custom-aspect; unit: ":1"; label: @tr("Picture format"); invalid: root.invalid == "aspect"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.custom-aspect; scrub: 0.01; step: 0.01; minimum: 0.3; unit: ":1"; label: @tr("Picture format"); invalid: root.invalid == "aspect"; edited => { root.sheet-changed(); } }
                     }
                     if root.picture != 0: Para { text: @tr("Black bars outside this format are cut off (top and bottom or left and right)."); }
                     Row {
@@ -1639,8 +1725,8 @@ export component AppWindow inherits SheetWindow {
                     }
                     if root.paper == 0: Row {
                         text: @tr("Width × height");
-                        NumberField { text <=> root.custom-w; unit: "mm"; label: @tr("Width"); invalid: root.invalid == "width"; edited => { root.sheet-changed(); } }
-                        NumberField { text <=> root.custom-h; unit: "mm"; label: @tr("Height"); invalid: root.invalid == "height"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.custom-w; scrub: 1; step: 1; minimum: 10; unit: "mm"; label: @tr("Width"); invalid: root.invalid == "width"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.custom-h; scrub: 1; step: 1; minimum: 10; unit: "mm"; label: @tr("Height"); invalid: root.invalid == "height"; edited => { root.sheet-changed(); } }
                     }
                     Row {
                         text: @tr("Orientation");
@@ -1653,39 +1739,25 @@ export component AppWindow inherits SheetWindow {
                     }
                     Row {
                         text: @tr("Resolution");
-                        NumberField { text <=> root.dpi; unit: "dpi"; label: @tr("Resolution"); invalid: root.invalid == "dpi"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.dpi; scrub: 1; step: 1; minimum: 10; unit: "dpi"; label: @tr("Resolution"); invalid: root.invalid == "dpi"; edited => { root.sheet-changed(); } }
                     }
                     Row {
                         text: @tr("Margin");
                         NumberField {
                             text <=> root.margin; unit: "mm"; label: @tr("Margin"); invalid: root.invalid == "margin";
-                            edited => { if root.margin.is-float() { margin-slider.value = root.margin.to-float(); } root.sheet-changed(); }
+                            scrub: 0.5; step: 0.5;
+                            edited => { root.sheet-changed(); }
                         }
-                    }
-                    // slider in half millimetres; the field above takes any value
-                    margin-slider := Slider {
-                        minimum: 0;
-                        maximum: 200;
-                        step: 1;
-                        value: root.margin.is-float() ? root.margin.to-float() : 10;
-                        accessible-label: @tr("Margin");
-                        changed(v) => { root.margin = Math.round(v); root.sheet-changed(); }
                     }
                     Row {
                         text: @tr("Gap between stills");
                         NumberField {
                             text <=> root.gap; unit: "mm"; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
-                            edited => { if root.gap.is-float() { gap-slider.value = root.gap.to-float(); } root.sheet-changed(); }
+                            scrub: 0.1; step: 0.1;
+                            edited => { root.sheet-changed(); }
                         }
                     }
-                    gap-slider := Slider {
-                        minimum: 0;
-                        maximum: 20;
-                        step: 0.5;
-                        value: root.gap.is-float() ? root.gap.to-float() : 3;
-                        accessible-label: @tr("Gap between stills");
-                        changed(v) => { root.gap = Math.round(v * 2) / 2; root.sheet-changed(); }
-                    }
+                    Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
                     Row {
                         text: @tr("Columns automatic");
                         VerticalLayout {
@@ -1695,7 +1767,7 @@ export component AppWindow inherits SheetWindow {
                     }
                     if !root.auto-cols: Row {
                         text: @tr("Columns");
-                        NumberField { text <=> root.cols; unit: ""; label: @tr("Columns"); invalid: root.invalid == "columns"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.cols; scrub: 0.1; step: 1; minimum: 1; unit: ""; label: @tr("Columns"); invalid: root.invalid == "columns"; edited => { root.sheet-changed(); } }
                     }
                     Row {
                         text: @tr("Crop marks");
@@ -1723,24 +1795,17 @@ export component AppWindow inherits SheetWindow {
                         spacing: 6px;
                         Text { text: @tr("Pattern"); font-size: 12px; color: Theme.text; height: 22px; vertical-alignment: center; }
                         PatternPicker { current <=> root.line-pattern; chosen => { root.sheet-changed(); } }
+                        Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
                         Row {
                             text: @tr("Thickness");
-                            NumberField { text <=> root.line-width; unit: "mm"; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
+                            NumberField { text <=> root.line-width; scrub: 0.02; step: 0.05; minimum: 0.05; unit: "mm"; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
                         }
                         Row {
                             text: @tr("Distance from the edge");
                             NumberField {
-                                text <=> root.line-inset; unit: "mm"; label: @tr("Distance from the edge"); invalid: root.invalid == "line-inset";
-                                edited => { if root.line-inset.is-float() { inset-slider.value = root.line-inset.to-float(); } root.sheet-changed(); }
+                                text <=> root.line-inset; scrub: 0.5; step: 0.5; unit: "mm"; label: @tr("Distance from the edge"); invalid: root.invalid == "line-inset";
+                                edited => { root.sheet-changed(); }
                             }
-                        }
-                        inset-slider := Slider {
-                            minimum: 0;
-                            maximum: 60;
-                            step: 0.5;
-                            value: root.line-inset.is-float() ? root.line-inset.to-float() : 6;
-                            accessible-label: @tr("Distance from the edge");
-                            changed(v) => { root.line-inset = Math.round(v * 2) / 2; root.sheet-changed(); }
                         }
                         ColorRow { text: @tr("Colour"); value <=> root.line-color; shown: root.line-swatch; invalid: root.invalid == "line-color"; edited => { root.sheet-changed(); } }
                     }
@@ -1786,7 +1851,7 @@ export component AppWindow inherits SheetWindow {
                             text: @tr("Size");
                             StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
                             StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
-                            NumberField { text <=> root.head-size; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
+                            NumberField { text <=> root.head-size; scrub: 0.5; step: 0.5; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
                         }
                         ColorRow { text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color"; edited => { root.sheet-changed(); } }
                         HorizontalLayout {
@@ -1803,20 +1868,34 @@ export component AppWindow inherits SheetWindow {
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                    NumberField { text <=> root.head-dx; unit: "mm"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                    NumberField { text <=> root.head-dx; scrub: 0.5; step: 0.5; minimum: -2000; unit: "mm"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
                                 }
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                    NumberField { text <=> root.head-dy; unit: "mm"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                    NumberField { text <=> root.head-dy; scrub: 0.5; step: 0.5; minimum: -2000; unit: "mm"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
                                 }
                             }
                         }
+                        Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
                         Para { text: @tr("The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."); }
                     }
                 }
 
-                // export stays at the bottom on every tab
+                // presets and export stay at the bottom on every tab
+                SectionLabel { text: @tr("PRESET"); }
+                Row {
+                    text: @tr("Preset");
+                    PresetMenu {
+                        items: root.presets;
+                        title: root.preset-name != "" ? root.preset-name : @tr("Choose…");
+                        chosen(i) => { root.preset-chosen(i); }
+                        save => { root.save-preset(); }
+                        load-file => { root.load-preset-file(); }
+                        show-folder => { root.show-presets(); }
+                    }
+                }
+                if root.preset-status != "": Para { text: root.preset-status; color: Theme.muted; }
                 SectionLabel { text: @tr("EXPORT"); }
                 Row {
                     text: @tr("Format");

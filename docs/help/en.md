@@ -36,7 +36,7 @@ If your picture has black bars, choose its format under Sheet › Picture format
 
 ## The sheet
 
-Paper: DIN A0 to A6 or Custom (width × height in mm), portrait or landscape. Resolution in dpi: 300 for print, 150 for the screen. Margin is the empty border around everything, Gap the space between two stills, both in mm. With Columns automatic CineMosaic chooses the number of columns that makes the stills largest; switch it off to set the number yourself. The line below shows the grid, the size of the sheet in pixels and the size of one still.
+Paper: DIN A0 to A6 or Custom (width × height in mm), portrait or landscape. Resolution in dpi: 300 for print, 150 for the screen. Margin is the empty border around everything, Gap the space between two stills, both in mm – press in the field and drag left or right to change them, or click and type. With Columns automatic CineMosaic chooses the number of columns that makes the stills largest; switch it off to set the number yourself. The line below shows the grid, the size of the sheet in pixels and the size of one still.
 
 Very large sheets (A0 at 600 dpi) need a lot of memory to save; the line below the sheet says how much.
 
@@ -47,6 +47,12 @@ The side column has four tabs: Source, Sheet, Line and Headline. Under Line, Fra
 Under Headline, type the title. The font list shows every font of your Mac in its own look; ↑ and ↓ step through it and the sheet follows at once, a letter jumps to the next font starting with it. Then size in points, bold, italic and colour. The anchor is the point of the sheet the headline hangs at – one of nine, like in an image editor; X and Y move it from there in mm. You can also drag the headline in the preview. Where it covers the frame line, the line breaks around it. A headline at the top or bottom keeps the stills clear; in the middle it lies over them.
 
 Sheet › Crop marks lays the sheet out in an area of the picture format inside the paper – for stills in 2:1 an area of 2:1 – and puts crop marks at its corners, so you can cut it out.
+
+## Presets
+
+A preset keeps the look of the sheet: paper, orientation, resolution, margin, gap, columns, picture format, crop marks, frame line, the headline's font, size, style, colour and place, and the export format. It does not keep the source or the headline text – they belong to the project.
+
+Under **Preset**, choose **Save as preset…** and give it a name. Saved presets appear in the same menu; choosing one sets every field at once. **Load from file…** opens a preset from anywhere, for example one a colleague sent you. **Show presets folder** opens the folder in the Finder; delete a preset there. The font is kept by name: if a Mac does not have it, the font stays as it is.
 
 ## Saving
 

@@ -308,6 +308,21 @@ msgstr "Spalten automatisch"
 msgid "Columns"
 msgstr "Spalten"
 
+msgid "PRESET"
+msgstr "PRESET"
+
+msgid "Preset"
+msgstr "Preset"
+
+msgid "Save as preset…"
+msgstr "Als Preset sichern…"
+
+msgid "Load from file…"
+msgstr "Aus Datei laden…"
+
+msgid "Show presets folder"
+msgstr "Preset-Ordner zeigen"
+
 msgid "EXPORT"
 msgstr "EXPORT"
 
@@ -457,3 +472,6 @@ msgstr "Nach unten verschieben"
 
 msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
 msgstr "Der Anker ist der Punkt des Bogens, an dem die Headline hängt; X und Y verschieben sie von dort. Du kannst sie auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie unterbrochen."
+
+msgid "Drag left or right in a field to change the value; click to type it."
+msgstr "Im Feld nach links oder rechts ziehen ändert den Wert; Klicken zum Tippen."

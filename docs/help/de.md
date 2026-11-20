@@ -36,7 +36,7 @@ Hat dein Bild schwarze Balken, wähle sein Format unter Bogen › Bildformat: 4:
 
 ## Der Bogen
 
-Papier: DIN A0 bis A6 oder Eigenes (Breite × Höhe in mm), Hoch- oder Querformat. Auflösung in dpi: 300 für den Druck, 150 für den Bildschirm. Rand ist der leere Rand um alles, Abstand der Platz zwischen zwei Stills, beides in mm. Mit Spalten automatisch wählt CineMosaic die Spaltenzahl, bei der die Stills am größten werden; schalte es aus, um die Zahl selbst festzulegen. Die Zeile darunter zeigt das Raster, die Größe des Bogens in Pixeln und die Größe eines Stills.
+Papier: DIN A0 bis A6 oder Eigenes (Breite × Höhe in mm), Hoch- oder Querformat. Auflösung in dpi: 300 für den Druck, 150 für den Bildschirm. Rand ist der leere Rand um alles, Abstand der Platz zwischen zwei Stills, beides in mm – ins Feld drücken und nach links oder rechts ziehen ändert den Wert, Klicken öffnet es zum Tippen. Mit Spalten automatisch wählt CineMosaic die Spaltenzahl, bei der die Stills am größten werden; schalte es aus, um die Zahl selbst festzulegen. Die Zeile darunter zeigt das Raster, die Größe des Bogens in Pixeln und die Größe eines Stills.
 
 Sehr große Bögen (A0 mit 600 dpi) brauchen zum Speichern viel Arbeitsspeicher; die Zeile unter dem Bogen sagt, wie viel.
 
@@ -47,6 +47,12 @@ Die Seitenspalte hat vier Reiter: Quelle, Bogen, Linie und Headline. Unter Linie
 Unter Headline tippst du den Titel. Die Schriftliste zeigt jede Schrift deines Macs in ihrem eigenen Aussehen; ↑ und ↓ blättern durch, der Bogen folgt sofort, ein Buchstabe springt zur nächsten Schrift mit diesem Anfang. Dann Größe in Punkt, fett, kursiv und Farbe. Der Anker ist der Punkt des Bogens, an dem die Headline hängt – einer von neun, wie in einem Bildprogramm; X und Y verschieben sie von dort in mm. Du kannst die Headline auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie um sie herum unterbrochen. Oben oder unten halten die Stills Abstand; in der Mitte liegt sie über ihnen.
 
 Bogen › Schnittmarken legt den Bogen in einer Fläche im Bildformat innerhalb des Papiers an – bei Stills in 2:1 eine Fläche in 2:1 – und setzt Schnittmarken an ihre Ecken, damit du sie ausschneiden kannst.
+
+## Presets
+
+Ein Preset merkt sich das Aussehen des Bogens: Papier, Ausrichtung, Auflösung, Rand, Abstand, Spalten, Bildformat, Schnittmarken, Rahmenlinie, Schrift, Größe, Stil, Farbe und Platz der Headline sowie das Exportformat. Die Quelle und den Headline-Text merkt es sich nicht – sie gehören zum Projekt.
+
+Unter **Preset** wählst du **Als Preset sichern…** und gibst ihm einen Namen. Gesicherte Presets stehen im selben Menü; ein Klick setzt alle Felder auf einmal. **Aus Datei laden…** öffnet ein Preset von überall, zum Beispiel eins, das dir jemand geschickt hat. **Preset-Ordner zeigen** öffnet den Ordner im Finder; dort löschst du ein Preset. Die Schrift wird über ihren Namen gemerkt: Fehlt sie auf einem Mac, bleibt die Schrift, wie sie ist.
 
 ## Speichern
 

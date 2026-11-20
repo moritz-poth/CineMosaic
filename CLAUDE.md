@@ -36,7 +36,8 @@ Picture format dropdown (Full frame, 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39, Cu
 
 ## Window and preview (user 2026-11-20)
 - Main window resizable: min 1000 × 920 (height lowered to the screen on small displays), set as Slint min size AND as NSWindow contentMinSize (`mac_window::set_min_size`, chrome timer) – checked: AppKit holds 1000 × 920.
-- Margin and Gap: number field + std Slider below it (0–40 / 0–20 mm, 0.5 steps); typing moves the slider (`edited` sets its value).
+- Standard window size 1573 × 920 (user's own window, 2026-11-20); on a smaller screen it is fitted once at the start. Min 1000 × 820.
+- Margin and Gap have no sliders any more (user 2026-11-20): `NumberField` scrubbing – press in the field and drag left/right (`scrub` per px: margin 0.5 mm, gap 0.1 mm, rounded to `step`); a click without dragging (≤ 2 px) focuses the field for typing. Since 2026-11-20 every number field scrubs (no sliders left): dpi / paper mm 1 per px, picture format 0.01, columns 1 per 10 px, line thickness 0.02 (steps of 0.05), line distance / headline X Y 0.5 mm, headline size 0.5 pt; each with its own `minimum`.
 - Preview zoom 100–800 %: trackpad pinch (`ScaleRotateGestureHandler`), ⌘ + scroll, buttons − / + / Fit bottom right, double-click fit ↔ 200 %; drag or two-finger scroll moves the page when zoomed (pan clamped so 40 px stay in view). The preview is drawn by one renderer thread (`start_renderer`, newest job wins, `RENDER_GEN`); zoomed it is drawn sharper (long side 1800 px × zoom, at most the sheet's own size and 8000 px), 180 ms after the zoom rests. Preview stills are 480 px copies – at high zoom on large sheets they look soft (the saved sheet uses the full stills).
 
 ## Sheet design (user 2026-11-20, second round)
@@ -46,6 +47,12 @@ Picture format dropdown (Full frame, 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39, Cu
 - Third round (user 2026-11-20): margin slider 0–200 mm in 1 mm steps. Line `Pattern` (Single, Double, Thick–thin, Thin–thick, Thin–thick–thin, Two close + one apart; strands in units of the thickness, `PatternPicker` draws them). Headline hangs at one of 9 anchors of the trim area (`AnchorPicker`, same point of the text box) moved by dx/dy mm (anchor change sets ±10 / ±8 mm inward); NOT on the line by default – every strand breaks only where the text box (+2 mm) covers it (`fill_except`); top/bottom anchors keep the stills clear, middle ones lie over them. Drag in the preview on the Headline tab (frame from Rust as page fractions `head-b*`, frozen while pressed). `FontList`: std ListView, every name in its own font, ↑/↓ + letter jump (`jump-font`), reveal on init and change.
 - Side column split into tabs Source / Sheet / Line / Headline (was Design) (`TabStrip`, `side-tab`); Export stays at the bottom; min height now 820. Colours: `ColorRow` (5 swatches + hex field, Rust shows what it read in the swatch square). Default orientation landscape.
 - Bin mode: Sequence menu starts with "All sequences" (default) = every sequence of the bin in natural name order (`bin::natural`), shots one after the other; `BinCut.timelines`, `BinCut::shots()`. Bin-mode UI tests must not run with the 2 s volume poll – it swaps the test volumes for the user's real ones (happened twice); test bin mode with the CLI.
+
+## Presets (user 2026-11-20)
+- Section PRESET above EXPORT, on every tab. Menu: saved presets, Save as preset…, Load from file…, Show presets folder.
+- Files: `~/Library/Application Support/CineMosaic/Presets/<name>.json` (`{"cinemosaic-preset": 1, …}`), written atomically; any .json with that key loads.
+- Kept: paper, orientation, dpi, margin, gap, columns, picture format, crop marks, line, headline font (by family name)/size/style/colour/anchor/offset, export format. Not kept: source, headline text (project-specific).
+- Loading ignores missing or out-of-range keys (older/newer presets). Round trip checked with a temporary hook 2026-11-20.
 
 ## Standard parts (2026-11-20, copied from MediaFiles Check)
 - Languages: UI `@tr()` + `scripts/translations.py` (table; run after every UI text change, fails on a missing entry; 69 entries taken over from Check) → `translations/<lang>/LC_MESSAGES/cinemosaic.po`, bundled by build.rs. Texts Rust writes: `tr([en, de, fr, es])` in app.rs with the global `LANG` (AtomicUsize, worker threads read it too); core messages users see per shot take a `lang` (`master_jobs`, `BinCut::jobs`). Parser errors of broken files stay English.

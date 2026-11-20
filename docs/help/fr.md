@@ -36,7 +36,7 @@ Si votre image a des bandes noires, choisissez son format sous Planche › Forma
 
 ## La planche
 
-Papier : DIN A0 à A6 ou Personnalisé (largeur × hauteur en mm), portrait ou paysage. Résolution en dpi : 300 pour l’impression, 150 pour l’écran. Marge est le bord vide autour de tout, Espace la place entre deux images, les deux en mm. Avec Colonnes automatiques, CineMosaic choisit le nombre de colonnes qui rend les images les plus grandes ; désactivez-le pour fixer le nombre vous-même. La ligne en dessous montre la grille, la taille de la planche en pixels et celle d’une image.
+Papier : DIN A0 à A6 ou Personnalisé (largeur × hauteur en mm), portrait ou paysage. Résolution en dpi : 300 pour l’impression, 150 pour l’écran. Marge est le bord vide autour de tout, Espace la place entre deux images, les deux en mm – appuyez dans le champ et faites glisser à gauche ou à droite pour changer la valeur, ou cliquez pour la saisir. Avec Colonnes automatiques, CineMosaic choisit le nombre de colonnes qui rend les images les plus grandes ; désactivez-le pour fixer le nombre vous-même. La ligne en dessous montre la grille, la taille de la planche en pixels et celle d’une image.
 
 Les très grandes planches (A0 à 600 dpi) demandent beaucoup de mémoire pour l’enregistrement ; la ligne sous la planche indique combien.
 
@@ -47,6 +47,12 @@ La colonne latérale a quatre onglets : Source, Planche, Cadre et Titre. Sous Ca
 Sous Titre, saisissez le titre. La liste des polices montre chaque police de votre Mac avec son propre dessin ; ↑ et ↓ la parcourent et la planche suit aussitôt, une lettre saute à la police suivante qui commence ainsi. Puis taille en points, gras, italique et couleur. L’ancre est le point de la planche auquel le titre est accroché – l’un des neuf, comme dans un logiciel d’image ; X et Y le déplacent depuis là en mm. Vous pouvez aussi faire glisser le titre dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt autour de lui. En haut ou en bas, les images gardent leur distance ; au milieu, il passe par-dessus.
 
 Planche › Traits de coupe met la planche en page dans une zone au format de l’image à l’intérieur du papier – pour des images en 2:1, une zone en 2:1 – et place des traits de coupe à ses coins pour la découper.
+
+## Préréglages
+
+Un préréglage garde l'aspect de la planche : papier, orientation, résolution, marge, espacement, colonnes, format d'image, traits de coupe, cadre, police, taille, style, couleur et place du titre, et le format d'export. Il ne garde ni la source ni le texte du titre : ils appartiennent au projet.
+
+Sous **Préréglage**, choisissez **Enregistrer comme préréglage…** et donnez-lui un nom. Les préréglages enregistrés apparaissent dans le même menu ; en choisir un règle tous les champs d'un coup. **Charger depuis un fichier…** ouvre un préréglage de n'importe où, par exemple celui qu'un collègue vous a envoyé. **Afficher le dossier des préréglages** ouvre le dossier dans le Finder ; supprimez-y un préréglage. La police est gardée par son nom : si un Mac ne l'a pas, la police reste inchangée.
 
 ## Enregistrer
 

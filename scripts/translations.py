@@ -109,6 +109,11 @@ T = {
     'Gap between stills': ('Abstand zwischen Stills', 'Espace entre les images', 'Espacio entre fotogramas'),
     'Columns automatic': ('Spalten automatisch', 'Colonnes automatiques', 'Columnas automáticas'),
     'Columns': ('Spalten', 'Colonnes', 'Columnas'),
+    'PRESET': ('PRESET', 'PRÉRÉGLAGE', 'PREAJUSTE'),
+    'Preset': ('Preset', 'Préréglage', 'Preajuste'),
+    'Save as preset…': ('Als Preset sichern…', 'Enregistrer comme préréglage…', 'Guardar como preajuste…'),
+    'Load from file…': ('Aus Datei laden…', 'Charger depuis un fichier…', 'Cargar desde archivo…'),
+    'Show presets folder': ('Preset-Ordner zeigen', 'Afficher le dossier des préréglages', 'Mostrar carpeta de preajustes'),
     'EXPORT': ('EXPORT', 'EXPORT', 'EXPORTAR'),
     'Format': ('Format', 'Format', 'Formato'),
     'Saving…': ('Speichere…', 'Enregistrement…', 'Guardando…'),
@@ -159,6 +164,7 @@ T = {
     'Move right': ('Nach rechts verschieben', 'Déplacer vers la droite', 'Mover a la derecha'),
     'Move down': ('Nach unten verschieben', 'Déplacer vers le bas', 'Mover hacia abajo'),
     'The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks.': ('Der Anker ist der Punkt des Bogens, an dem die Headline hängt; X und Y verschieben sie von dort. Du kannst sie auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie unterbrochen.', 'L’ancre est le point de la planche auquel le titre est accroché ; X et Y le déplacent depuis là. Vous pouvez aussi le faire glisser dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt.', 'El ancla es el punto de la hoja del que cuelga el título; X e Y lo mueven desde ahí. También puedes arrastrarlo en la vista previa. Donde cubre la línea de marco, la línea se interrumpe.'),
+    'Drag left or right in a field to change the value; click to type it.': ('Im Feld nach links oder rechts ziehen ändert den Wert; Klicken zum Tippen.', 'Faites glisser à gauche ou à droite dans un champ pour changer la valeur ; cliquez pour la saisir.', 'Arrastra a la izquierda o a la derecha en un campo para cambiar el valor; haz clic para escribirlo.'),
 }
 
 def q(s):

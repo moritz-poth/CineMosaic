@@ -308,6 +308,21 @@ msgstr "Columnas automáticas"
 msgid "Columns"
 msgstr "Columnas"
 
+msgid "PRESET"
+msgstr "PREAJUSTE"
+
+msgid "Preset"
+msgstr "Preajuste"
+
+msgid "Save as preset…"
+msgstr "Guardar como preajuste…"
+
+msgid "Load from file…"
+msgstr "Cargar desde archivo…"
+
+msgid "Show presets folder"
+msgstr "Mostrar carpeta de preajustes"
+
 msgid "EXPORT"
 msgstr "EXPORTAR"
 
@@ -457,3 +472,6 @@ msgstr "Mover hacia abajo"
 
 msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
 msgstr "El ancla es el punto de la hoja del que cuelga el título; X e Y lo mueven desde ahí. También puedes arrastrarlo en la vista previa. Donde cubre la línea de marco, la línea se interrumpe."
+
+msgid "Drag left or right in a field to change the value; click to type it."
+msgstr "Arrastra a la izquierda o a la derecha en un campo para cambiar el valor; haz clic para escribirlo."

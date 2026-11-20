@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Model, ModelRc, SharedString, VecModel};
 use cinemosaic::bin::{BinCut, sequences};
 use cinemosaic::timeline::{Rate, Shot, Timeline, format_tc};
 use cinemosaic::report::{self, Outcome, Report};
@@ -651,6 +651,140 @@ fn load_fonts(app: &AppWindow) {
             refresh(&app);
         });
     });
+}
+
+fn presets_dir() -> Option<PathBuf> {
+    app_dir().map(|d| d.join("Presets"))
+}
+
+/// Fills the Preset menu with the files in the presets folder, by name.
+fn list_presets(app: &AppWindow) {
+    let mut names: Vec<String> = presets_dir()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.path().file_name()?.to_str()?.strip_suffix(".json").map(str::to_string))
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    let model: Vec<SharedString> = names.iter().map(|n| n.as_str().into()).collect();
+    app.set_presets(ModelRc::new(VecModel::from(model)));
+}
+
+/// Everything about the look of the sheet, as JSON: paper, picture format, line, headline style and place, crop
+/// marks, export format. Not the source and not the headline text: they belong to the project. The font is kept by
+/// name, so the preset works on another Mac.
+fn preset_json(app: &AppWindow) -> serde_json::Value {
+    let font = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned()).unwrap_or_default();
+    serde_json::json!({
+        "cinemosaic-preset": 1,
+        "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
+        "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
+        "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
+        "picture": app.get_picture(), "custom-aspect": app.get_custom_aspect().as_str(), "trim": app.get_trim(),
+        "line-on": app.get_line_on(), "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
+        "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
+        "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
+        "head-color": app.get_head_color().as_str(), "head-anchor": app.get_head_anchor(),
+        "head-dx": app.get_head_dx().as_str(), "head-dy": app.get_head_dy().as_str(),
+        "export-format": app.get_export_format(),
+    })
+}
+
+/// Sets the fields from a preset. Missing or wrong keys keep the field as it is (older or newer presets).
+fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
+    let int = |k: &str, max: i64, set: &dyn Fn(i32)| {
+        if let Some(n) = v.get(k).and_then(|x| x.as_i64()).filter(|n| (0..=max).contains(n)) {
+            set(n as i32)
+        }
+    };
+    let boolean = |k: &str, set: &dyn Fn(bool)| v.get(k).and_then(|x| x.as_bool()).into_iter().for_each(set);
+    let text = |k: &str, set: &dyn Fn(SharedString)| v.get(k).and_then(|x| x.as_str()).filter(|s| s.len() < 100).into_iter().for_each(|s| set(s.into()));
+    int("paper", layout::DIN.len() as i64, &|n| app.set_paper(n));
+    text("custom-w", &|s| app.set_custom_w(s));
+    text("custom-h", &|s| app.set_custom_h(s));
+    boolean("landscape", &|b| app.set_landscape(b));
+    text("dpi", &|s| app.set_dpi(s));
+    text("margin", &|s| app.set_margin(s));
+    text("gap", &|s| app.set_gap(s));
+    boolean("auto-cols", &|b| app.set_auto_cols(b));
+    text("cols", &|s| app.set_cols(s));
+    int("picture", layout::PICTURE.len() as i64 + 1, &|n| app.set_picture(n));
+    text("custom-aspect", &|s| app.set_custom_aspect(s));
+    boolean("trim", &|b| app.set_trim(b));
+    boolean("line-on", &|b| app.set_line_on(b));
+    text("line-width", &|s| app.set_line_width(s));
+    text("line-inset", &|s| app.set_line_inset(s));
+    text("line-color", &|s| app.set_line_color(s));
+    int("line-pattern", layout::Pattern::ALL.len() as i64 - 1, &|n| app.set_line_pattern(n));
+    if let Some(name) = v.get("font").and_then(|x| x.as_str())
+        && let Some(i) = FONTS.with(|f| f.borrow().iter().position(|n| n == name))
+    {
+        app.set_font(i as i32);
+    }
+    text("head-size", &|s| app.set_head_size(s));
+    boolean("head-bold", &|b| app.set_head_bold(b));
+    boolean("head-italic", &|b| app.set_head_italic(b));
+    text("head-color", &|s| app.set_head_color(s));
+    int("head-anchor", 8, &|n| app.set_head_anchor(n));
+    text("head-dx", &|s| app.set_head_dx(s));
+    text("head-dy", &|s| app.set_head_dy(s));
+    int("export-format", 3, &|n| app.set_export_format(n));
+}
+
+fn load_preset(app: &AppWindow, path: &Path) {
+    let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let read = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).filter(|v| v.get("cinemosaic-preset").is_some());
+    match read {
+        Some(v) => {
+            apply_preset(app, &v);
+            app.set_preset_name(name.as_str().into());
+            app.set_preset_status(SharedString::new());
+            log::write(&format!("preset loaded: {}", path.display()));
+            refresh(app);
+        }
+        None => {
+            app.set_preset_status(tr(["This file is not a CineMosaic preset.", "Diese Datei ist kein CineMosaic-Preset.", "Ce fichier n'est pas un préréglage CineMosaic.", "Este archivo no es un preajuste de CineMosaic."]).into());
+            log::write(&format!("preset not readable: {}", path.display()));
+        }
+    }
+}
+
+fn save_preset(app: &AppWindow) {
+    let Some(dir) = presets_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let suggested = if app.get_preset_name().is_empty() { "Preset".to_string() } else { app.get_preset_name().to_string() };
+    let Some(mut path) = rfd::FileDialog::new()
+        .set_title(tr(["Save as preset", "Als Preset sichern", "Enregistrer comme préréglage", "Guardar como preajuste"]))
+        .set_directory(&dir)
+        .set_file_name(format!("{suggested}.json"))
+        .add_filter("CineMosaic preset", &["json"])
+        .save_file()
+    else {
+        return;
+    };
+    if path.extension().is_none_or(|e| e != "json") {
+        path.set_extension("json");
+    }
+    let body = serde_json::to_vec_pretty(&preset_json(app)).unwrap_or_default();
+    // atomic: a half-written preset would not load
+    let part = path.with_extension("json.part");
+    let ok = std::fs::write(&part, body).and_then(|_| std::fs::rename(&part, &path));
+    match ok {
+        Ok(()) => {
+            let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            app.set_preset_name(name.as_str().into());
+            app.set_preset_status(SharedString::new());
+            log::write(&format!("preset saved: {}", path.display()));
+            list_presets(app);
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&part);
+            app.set_preset_status(tr(["Could not save the preset: {}", "Preset ließ sich nicht sichern: {}", "Impossible d'enregistrer le préréglage : {}", "No se pudo guardar el preajuste: {}"]).replacen("{}", &e.to_string(), 1).into());
+            log::write(&format!("preset save failed: {}: {e}", path.display()));
+        }
+    }
 }
 
 /// Picture format to crop to: None = full frame; Err = the custom field is not a format.
@@ -1386,6 +1520,40 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(save)
     });
+    list_presets(&app);
+    app.on_preset_chosen({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            let name = app.get_presets().row_data(i as usize).unwrap_or_default();
+            if let Some(dir) = presets_dir() {
+                load_preset(&app, &dir.join(format!("{name}.json")));
+            }
+        }
+    });
+    app.on_load_preset_file({
+        let weak = app.as_weak();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut dialog = rfd::FileDialog::new().set_title(tr(["Load preset", "Preset laden", "Charger un préréglage", "Cargar preajuste"])).add_filter("CineMosaic preset", &["json"]);
+            if let Some(dir) = presets_dir() {
+                dialog = dialog.set_directory(dir);
+            }
+            if let Some(p) = dialog.pick_file() {
+                load_preset(&app, &p);
+            }
+        }
+    });
+    app.on_save_preset({
+        let weak = app.as_weak();
+        move || weak.upgrade().iter().for_each(save_preset)
+    });
+    app.on_show_presets(|| {
+        if let Some(dir) = presets_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::process::Command::new("open").arg(dir).spawn();
+        }
+    });
     app.on_reveal(|| {
         if let Some(p) = STATE.with(|st| st.borrow().saved.clone()) {
             let _ = std::process::Command::new("open").arg("-R").arg(p).spawn();
@@ -1407,14 +1575,24 @@ fn main() -> Result<(), slint::PlatformError> {
     #[cfg(target_os = "macos")]
     chrome.start(slint::TimerMode::Repeated, Duration::from_millis(200), {
         let (win, settings, weak) = (others.settings.clone(), settings.clone(), app.as_weak());
+        let fitted = std::cell::Cell::new(false);
         move || {
             mac_window::appearance_all(settings.borrow().dark);
             // the main window can grow, never shrink below what the side column needs (also when dragged)
             if let Some(a) = weak.upgrade() {
                 // never taller than the screen minus the title bar (small laptops)
-                let screen = mac_window::screen_height();
-                if screen > 0.0 && ((screen - 28.0).min(920.0) - a.get_smallest_height() as f64).abs() > 0.5 {
-                    a.set_smallest_height((screen - 28.0).min(920.0) as f32);
+                let (screen_w, screen) = mac_window::screen_size();
+                if screen > 0.0 && ((screen - 28.0).min(820.0) - a.get_smallest_height() as f64).abs() > 0.5 {
+                    a.set_smallest_height((screen - 28.0).min(820.0) as f32);
+                }
+                // the standard size is made for a large screen: on a smaller one the window fits it, once
+                if screen > 0.0 && !fitted.get() {
+                    fitted.set(true);
+                    let size = a.window().size().to_logical(a.window().scale_factor());
+                    let (w, h) = ((size.width as f64).min(screen_w), (size.height as f64).min(screen - 28.0));
+                    if w < size.width as f64 - 0.5 || h < size.height as f64 - 0.5 {
+                        a.window().set_size(slint::LogicalSize::new(w as f32, h as f32));
+                    }
                 }
                 mac_window::set_min_size(a.window(), a.get_smallest_width() as f64, a.get_smallest_height() as f64);
             }
@@ -1715,15 +1893,15 @@ mod mac_window {
         }
     }
 
-    /// Usable height of the main screen (without menu bar and Dock), in points; 0 if unknown.
-    pub fn screen_height() -> f64 {
+    /// Usable size of the main screen (without menu bar and Dock), in points; (0, 0) if unknown.
+    pub fn screen_size() -> (f64, f64) {
         unsafe {
             let screen: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
             if screen.is_null() {
-                return 0.0;
+                return (0.0, 0.0);
             }
             let frame: Rect = msg_send![screen, visibleFrame];
-            frame.height
+            (frame.width, frame.height)
         }
     }
 

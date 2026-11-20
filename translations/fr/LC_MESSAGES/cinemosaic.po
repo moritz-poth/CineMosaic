@@ -308,6 +308,21 @@ msgstr "Colonnes automatiques"
 msgid "Columns"
 msgstr "Colonnes"
 
+msgid "PRESET"
+msgstr "PRÉRÉGLAGE"
+
+msgid "Preset"
+msgstr "Préréglage"
+
+msgid "Save as preset…"
+msgstr "Enregistrer comme préréglage…"
+
+msgid "Load from file…"
+msgstr "Charger depuis un fichier…"
+
+msgid "Show presets folder"
+msgstr "Afficher le dossier des préréglages"
+
 msgid "EXPORT"
 msgstr "EXPORT"
 
@@ -457,3 +472,6 @@ msgstr "Déplacer vers le bas"
 
 msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
 msgstr "L’ancre est le point de la planche auquel le titre est accroché ; X et Y le déplacent depuis là. Vous pouvez aussi le faire glisser dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt."
+
+msgid "Drag left or right in a field to change the value; click to type it."
+msgstr "Faites glisser à gauche ou à droite dans un champ pour changer la valeur ; cliquez pour la saisir."

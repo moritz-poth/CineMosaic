@@ -36,7 +36,7 @@ Si tu imagen tiene barras negras, elige su formato en Hoja › Formato de imagen
 
 ## La hoja
 
-Papel: DIN A0 a A6 o Personalizado (ancho × alto en mm), vertical u horizontal. Resolución en dpi: 300 para imprimir, 150 para la pantalla. Margen es el borde vacío alrededor de todo, Espacio el hueco entre dos fotogramas, ambos en mm. Con Columnas automáticas, CineMosaic elige el número de columnas que hace los fotogramas más grandes; desactívalo para fijar el número tú. La línea de abajo muestra la cuadrícula, el tamaño de la hoja en píxeles y el de un fotograma.
+Papel: DIN A0 a A6 o Personalizado (ancho × alto en mm), vertical u horizontal. Resolución en dpi: 300 para imprimir, 150 para la pantalla. Margen es el borde vacío alrededor de todo, Espacio el hueco entre dos fotogramas, ambos en mm: pulsa en el campo y arrastra a izquierda o derecha para cambiar el valor, o haz clic para escribirlo. Con Columnas automáticas, CineMosaic elige el número de columnas que hace los fotogramas más grandes; desactívalo para fijar el número tú. La línea de abajo muestra la cuadrícula, el tamaño de la hoja en píxeles y el de un fotograma.
 
 Las hojas muy grandes (A0 a 600 dpi) necesitan mucha memoria para guardarse; la línea bajo la hoja dice cuánta.
 
@@ -47,6 +47,12 @@ La columna lateral tiene cuatro pestañas: Origen, Hoja, Línea y Título. En L�
 En Título escribe el título. La lista de fuentes muestra cada fuente de tu Mac con su propio aspecto; ↑ y ↓ la recorren y la hoja cambia al momento, una letra salta a la siguiente fuente que empieza así. Después tamaño en puntos, negrita, cursiva y color. El ancla es el punto de la hoja del que cuelga el título, uno de nueve, como en un programa de imagen; X e Y lo mueven desde ahí en mm. También puedes arrastrar el título en la vista previa. Donde cubre la línea de marco, la línea se interrumpe a su alrededor. Arriba o abajo, los fotogramas guardan distancia; en el centro queda por encima de ellos.
 
 Hoja › Marcas de corte compone la hoja en una zona con el formato de imagen dentro del papel –para fotogramas en 2:1, una zona en 2:1– y pone marcas de corte en sus esquinas para recortarla.
+
+## Preajustes
+
+Un preajuste guarda el aspecto de la hoja: papel, orientación, resolución, margen, separación, columnas, formato de imagen, marcas de corte, línea de marco, fuente, tamaño, estilo, color y posición del título, y el formato de exportación. No guarda la fuente de material ni el texto del título: pertenecen al proyecto.
+
+En **Preajuste**, elige **Guardar como preajuste…** y dale un nombre. Los preajustes guardados aparecen en el mismo menú; elegir uno ajusta todos los campos a la vez. **Cargar desde archivo…** abre un preajuste desde cualquier lugar, por ejemplo uno que te haya enviado un colega. **Mostrar carpeta de preajustes** abre la carpeta en el Finder; allí se borra un preajuste. La fuente se guarda por su nombre: si un Mac no la tiene, la fuente se queda como está.
 
 ## Guardar
 
