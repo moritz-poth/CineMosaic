@@ -1,5 +1,5 @@
 // CineMosaic window. Look and parts from MediaFiles Check (Theme, CheckButton, Dropdown, Switch). Texts in English in @tr().
-import { Palette, Spinner, Slider } from "std-widgets.slint";
+import { Palette, Spinner, Slider, ListView } from "std-widgets.slint";
 import "fonts/JetBrainsMono-Regular.ttf";
 import "fonts/JetBrainsMono-Medium.ttf";
 import "fonts/JetBrainsMono-SemiBold.ttf";
@@ -1092,6 +1092,137 @@ export component SettingsWindow inherits SheetWindow {
     }
 }
 
+// Line patterns as small drawings; the strands in units of 1.6 px (see layout::Pattern)
+component PatternPicker inherits HorizontalLayout {
+    in-out property <int> current;
+    callback chosen();
+    spacing: 6px;
+    for p[i] in [
+        { name: @tr("Single"), s: [{ o: 0, w: 1 }] },
+        { name: @tr("Double"), s: [{ o: 0, w: 1 }, { o: 2.5, w: 1 }] },
+        { name: @tr("Thick – thin"), s: [{ o: 0, w: 3 }, { o: 4.5, w: 1 }] },
+        { name: @tr("Thin – thick"), s: [{ o: 0, w: 1 }, { o: 2.5, w: 3 }] },
+        { name: @tr("Thin – thick – thin"), s: [{ o: 0, w: 1 }, { o: 2.5, w: 2.5 }, { o: 6.5, w: 1 }] },
+        { name: @tr("Two close, one apart"), s: [{ o: 0, w: 1 }, { o: 2.2, w: 1 }, { o: 7, w: 1 }] },
+    ]: Rectangle {
+        width: 46px;
+        height: 30px;
+        border-radius: 6px;
+        border-width: i == root.current ? 2px : 1px;
+        border-color: i == root.current ? Theme.accent : Theme.line;
+        background: t.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+        accessible-role: button;
+        accessible-label: p.name;
+        accessible-checked: i == root.current;
+        accessible-action-default => { root.current = i; root.chosen(); }
+        for st in p.s: Rectangle {
+            x: 7px;
+            y: 8px + st.o * 1.6px;
+            width: parent.width - 14px;
+            height: max(1px, st.w * 1.6px);
+            background: Theme.text;
+        }
+        t := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.current = i; root.chosen(); }
+        }
+    }
+}
+
+// 3 × 3 anchor points like in an image editor; the chosen one filled
+component AnchorPicker inherits Rectangle {
+    in property <int> current;
+    callback chosen(int);
+    width: 70px;
+    height: 52px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Theme.line;
+    for i in 9: Rectangle {
+        x: 8px + Math.mod(i, 3) * 21px;
+        y: 6px + Math.floor(i / 3) * 15px;
+        width: 12px;
+        height: 10px;
+        border-radius: 2px;
+        border-width: 1px;
+        border-color: i == root.current ? Theme.accent : Theme.muted;
+        background: i == root.current ? Theme.accent : a.has-hover ? Theme.text.with-alpha(0.15) : transparent;
+        accessible-role: button;
+        accessible-label: [@tr("Top left"), @tr("Top centre"), @tr("Top right"), @tr("Middle left"), @tr("Centre"), @tr("Middle right"), @tr("Bottom left"), @tr("Bottom centre"), @tr("Bottom right")][i];
+        accessible-checked: i == root.current;
+        accessible-action-default => { root.chosen(i); }
+        a := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.chosen(i); }
+        }
+    }
+}
+
+// Installed fonts, each name shown in its own font; ↑ / ↓ step through them, a letter jumps there
+component FontList inherits Rectangle {
+    in property <[string]> fonts;
+    in-out property <int> current;
+    callback chosen();
+    callback jump(string) -> int;
+    property <length> row-h: 28px;
+    height: 7 * self.row-h + 2px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.line;
+    clip: true;
+    // keep the current font in view
+    function reveal() {
+        if root.current * root.row-h < -list.content-y {
+            list.content-y = -root.current * root.row-h;
+        } else if (root.current + 1) * root.row-h > -list.content-y + list.visible-height {
+            list.content-y = -((root.current + 1) * root.row-h - list.visible-height);
+        }
+    }
+    changed current => { root.reveal(); }
+    // the list is made each time the tab opens: show the chosen font right away
+    init => { root.reveal(); }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.UpArrow {
+                if root.current > 0 { root.current -= 1; root.chosen(); }
+                return accept;
+            }
+            if e.text == Key.DownArrow {
+                if root.current < root.fonts.length - 1 { root.current += 1; root.chosen(); }
+                return accept;
+            }
+            if e.text != "" && !e.modifiers.control && !e.modifiers.meta {
+                let i = root.jump(e.text);
+                if i >= 0 { root.current = i; root.chosen(); }
+                return accept;
+            }
+            reject
+        }
+        list := ListView {
+            for f[i] in root.fonts: Rectangle {
+                height: root.row-h;
+                background: i == root.current ? Theme.accent.with-alpha(0.28) : t.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+                accessible-role: list-item;
+                accessible-label: f;
+                accessible-checked: i == root.current;
+                Text {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    text: f;
+                    font-family: f;
+                    font-size: 15px;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                t := TouchArea {
+                    clicked => { root.current = i; fs.focus(); root.chosen(); }
+                }
+            }
+        }
+    }
+}
+
 // Tabs of the side column: one segmented bar, the current segment filled
 component TabStrip inherits Rectangle {
     in property <[string]> items;
@@ -1307,7 +1438,20 @@ export component AppWindow inherits SheetWindow {
     in-out property <string> line-inset: "6";
     in-out property <string> line-color: "#000000";
     in property <color> line-swatch: black;
+    in-out property <int> line-pattern;
     in-out property <string> headline;
+    // headline anchor 0–8 (rows top / middle / bottom × left / centre / right) and its move in mm
+    in property <int> head-anchor: 1;
+    in-out property <string> head-dx: "0";
+    in-out property <string> head-dy: "8";
+    // where Rust drew the headline, as fractions of the page, and the page width in mm (dragging)
+    in property <float> head-bx;
+    in property <float> head-by;
+    in property <float> head-bw;
+    in property <float> head-bh;
+    in property <float> page-w-mm: 297;
+    callback anchor-chosen(int);
+    callback jump-font(string) -> int;
     in property <[string]> fonts;
     in-out property <int> font;
     in-out property <string> head-size: "24";
@@ -1315,8 +1459,7 @@ export component AppWindow inherits SheetWindow {
     in-out property <bool> head-italic;
     in-out property <string> head-color: "#000000";
     in property <color> head-swatch: black;
-    // 0–2 top left / centre / right, 3–5 bottom
-    in-out property <int> head-pos: 1;
+
     in-out property <string> custom-w: "500";
     in-out property <string> custom-h: "700";
     in-out property <string> dpi: "300";
@@ -1370,7 +1513,7 @@ export component AppWindow inherits SheetWindow {
                     UpdateOffer { text-width: Metrics.text-width; }
                 }
                 TabStrip {
-                    items: [@tr("Source"), @tr("Sheet"), @tr("Design")];
+                    items: [@tr("Source"), @tr("Sheet"), @tr("Line"), @tr("Headline")];
                     current <=> root.side-tab;
                 }
                 Rectangle { height: 6px; }
@@ -1522,11 +1665,11 @@ export component AppWindow inherits SheetWindow {
                     // slider in half millimetres; the field above takes any value
                     margin-slider := Slider {
                         minimum: 0;
-                        maximum: 40;
-                        step: 0.5;
+                        maximum: 200;
+                        step: 1;
                         value: root.margin.is-float() ? root.margin.to-float() : 10;
                         accessible-label: @tr("Margin");
-                        changed(v) => { root.margin = Math.round(v * 2) / 2; root.sheet-changed(); }
+                        changed(v) => { root.margin = Math.round(v); root.sheet-changed(); }
                     }
                     Row {
                         text: @tr("Gap between stills");
@@ -1569,7 +1712,6 @@ export component AppWindow inherits SheetWindow {
                     spacing: 6px;
                     alignment: start;
                     vertical-stretch: 1;
-                    SectionLabel { text: @tr("LINE"); }
                     Row {
                         text: @tr("Frame line");
                         VerticalLayout {
@@ -1579,6 +1721,8 @@ export component AppWindow inherits SheetWindow {
                     }
                     if root.line-on: VerticalLayout {
                         spacing: 6px;
+                        Text { text: @tr("Pattern"); font-size: 12px; color: Theme.text; height: 22px; vertical-alignment: center; }
+                        PatternPicker { current <=> root.line-pattern; chosen => { root.sheet-changed(); } }
                         Row {
                             text: @tr("Thickness");
                             NumberField { text <=> root.line-width; unit: "mm"; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
@@ -1592,7 +1736,7 @@ export component AppWindow inherits SheetWindow {
                         }
                         inset-slider := Slider {
                             minimum: 0;
-                            maximum: 40;
+                            maximum: 60;
                             step: 0.5;
                             value: root.line-inset.is-float() ? root.line-inset.to-float() : 6;
                             accessible-label: @tr("Distance from the edge");
@@ -1600,9 +1744,11 @@ export component AppWindow inherits SheetWindow {
                         }
                         ColorRow { text: @tr("Colour"); value <=> root.line-color; shown: root.line-swatch; invalid: root.invalid == "line-color"; edited => { root.sheet-changed(); } }
                     }
-
-                    Rectangle { height: 10px; }
-                    SectionLabel { text: @tr("HEADLINE"); }
+                }
+                if root.side-tab == 3: VerticalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    vertical-stretch: 1;
                     FieldFrame {
                         height: 26px;
                         border-color: head-input.has-focus ? Theme.accent : Theme.line;
@@ -1629,14 +1775,12 @@ export component AppWindow inherits SheetWindow {
                     }
                     if root.headline != "": VerticalLayout {
                         spacing: 6px;
-                        Row {
-                            text: @tr("Font");
-                            if root.fonts.length > 0: Dropdown {
-                                label: @tr("Font");
-                                items: root.fonts;
-                                current: root.font;
-                                selected(i) => { root.font = i; root.sheet-changed(); }
-                            }
+                        Text { text: @tr("Font"); font-size: 12px; color: Theme.text; height: 22px; vertical-alignment: center; }
+                        FontList {
+                            fonts: root.fonts;
+                            current <=> root.font;
+                            chosen => { root.sheet-changed(); }
+                            jump(t) => { return root.jump-font(t); }
                         }
                         Row {
                             text: @tr("Size");
@@ -1645,16 +1789,30 @@ export component AppWindow inherits SheetWindow {
                             NumberField { text <=> root.head-size; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
                         }
                         ColorRow { text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color"; edited => { root.sheet-changed(); } }
-                        Row {
-                            text: @tr("Position");
-                            Dropdown {
-                                label: @tr("Position");
-                                items: [@tr("Top left"), @tr("Top centre"), @tr("Top right"), @tr("Bottom left"), @tr("Bottom centre"), @tr("Bottom right")];
-                                current: root.head-pos;
-                                selected(i) => { root.head-pos = i; root.sheet-changed(); }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text { text: @tr("Anchor"); font-size: 12px; color: Theme.text; }
+                                AnchorPicker { current: root.head-anchor; chosen(i) => { root.anchor-chosen(i); } }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            VerticalLayout {
+                                spacing: 6px;
+                                alignment: end;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                                    NumberField { text <=> root.head-dx; unit: "mm"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                                    NumberField { text <=> root.head-dy; unit: "mm"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                }
                             }
                         }
-                        Para { text: root.line-on ? @tr("The headline sits on the frame line; the line breaks around it.") : @tr("Without a frame line the headline sits at the line's distance from the edge."); }
+                        Para { text: @tr("The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."); }
                     }
                 }
 
@@ -1733,6 +1891,40 @@ export component AppWindow inherits SheetWindow {
                     image-fit: fill;
                     accessible-role: image;
                     accessible-label: @tr("Preview of the sheet");
+                }
+            }
+            // on the Headline tab the headline can be dragged; its frame stays put while dragging (the preview
+            // follows from Rust, the frame would otherwise run away under the mouse)
+            if root.side-tab == 3 && root.headline != "" && root.head-bw > 0: Rectangle {
+                property <float> bx0;
+                property <float> by0;
+                property <float> dx0;
+                property <float> dy0;
+                x: page.x + page.width * (hd.pressed ? self.bx0 : root.head-bx) - 4px;
+                y: page.y + page.height * (hd.pressed ? self.by0 : root.head-by) - 4px;
+                width: page.width * root.head-bw + 8px;
+                height: page.height * root.head-bh + 8px;
+                border-width: 1px;
+                border-radius: 3px;
+                border-color: hd.has-hover || hd.pressed ? Theme.accent : Theme.accent.with-alpha(0.35);
+                hd := TouchArea {
+                    mouse-cursor: move;
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down {
+                            parent.bx0 = root.head-bx;
+                            parent.by0 = root.head-by;
+                            parent.dx0 = root.head-dx.is-float() ? root.head-dx.to-float() : 0;
+                            parent.dy0 = root.head-dy.is-float() ? root.head-dy.to-float() : 0;
+                        }
+                    }
+                    moved => {
+                        if self.pressed {
+                            let mm = root.page-w-mm / (page.width / 1px);
+                            root.head-dx = Math.round((parent.dx0 + (self.mouse-x - self.pressed-x) / 1px * mm) * 2) / 2;
+                            root.head-dy = Math.round((parent.dy0 + (self.mouse-y - self.pressed-y) / 1px * mm) * 2) / 2;
+                            root.sheet-changed();
+                        }
+                    }
                 }
             }
             // pinch on the trackpad

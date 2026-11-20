@@ -344,17 +344,11 @@ msgstr "Ajuster toute la planche"
 msgid "Sheet"
 msgstr "Planche"
 
-msgid "Design"
-msgstr "Mise en page"
-
 msgid "Crop marks"
 msgstr "Traits de coupe"
 
 msgid "The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out."
 msgstr "La planche est mise en page dans une zone au format de l’image à l’intérieur du papier, avec des traits de coupe aux coins pour la découper."
-
-msgid "LINE"
-msgstr "CADRE"
 
 msgid "Frame line"
 msgstr "Cadre"
@@ -383,9 +377,6 @@ msgstr "Blanc"
 msgid "Red"
 msgstr "Rouge"
 
-msgid "HEADLINE"
-msgstr "TITRE"
-
 msgid "Headline"
 msgstr "Titre"
 
@@ -403,9 +394,6 @@ msgstr "Gras"
 
 msgid "Italic"
 msgstr "Italique"
-
-msgid "Position"
-msgstr "Position"
 
 msgid "Top left"
 msgstr "En haut à gauche"
@@ -425,8 +413,47 @@ msgstr "En bas au centre"
 msgid "Bottom right"
 msgstr "En bas à droite"
 
-msgid "The headline sits on the frame line; the line breaks around it."
-msgstr "Le titre se place sur le cadre ; le trait s’interrompt autour de lui."
+msgid "Line"
+msgstr "Cadre"
 
-msgid "Without a frame line the headline sits at the line's distance from the edge."
-msgstr "Sans cadre, le titre se place à la distance du cadre au bord."
+msgid "Pattern"
+msgstr "Motif"
+
+msgid "Single"
+msgstr "Simple"
+
+msgid "Double"
+msgstr "Double"
+
+msgid "Thick – thin"
+msgstr "Épais – fin"
+
+msgid "Thin – thick"
+msgstr "Fin – épais"
+
+msgid "Thin – thick – thin"
+msgstr "Fin – épais – fin"
+
+msgid "Two close, one apart"
+msgstr "Deux proches, un écarté"
+
+msgid "Anchor"
+msgstr "Ancre"
+
+msgid "Middle left"
+msgstr "Au milieu à gauche"
+
+msgid "Centre"
+msgstr "Centre"
+
+msgid "Middle right"
+msgstr "Au milieu à droite"
+
+msgid "Move right"
+msgstr "Déplacer vers la droite"
+
+msgid "Move down"
+msgstr "Déplacer vers le bas"
+
+msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
+msgstr "L’ancre est le point de la planche auquel le titre est accroché ; X et Y le déplacent depuis là. Vous pouvez aussi le faire glisser dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt."

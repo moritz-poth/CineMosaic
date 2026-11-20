@@ -1,6 +1,6 @@
 //! The sheet: paper size, resolution, margin and gap → a grid of equal cells filled left to right, top to bottom,
-//! centred in its area. Optional: a trim area in the picture format with crop marks, a frame line, a headline that
-//! sits on the line (the line breaks around it). Line, headline and grid keep out of each other's way.
+//! centred in its area. Optional: a trim area in the picture format with crop marks, a frame line of parallel
+//! strands, a headline hung at any point of the sheet (where it covers the line, the line breaks). Line, headline and grid keep out of each other's way.
 
 use crate::fonts::Face;
 use ab_glyph::{Font, PxScale, ScaleFont, point};
@@ -17,15 +17,49 @@ const MARK_LENGTH: f64 = 6.0;
 /// Space between the headline and the line ends it breaks, and between headline / line and the stills (mm).
 const BREAK_PAD: f64 = 2.0;
 const CLEARANCE: f64 = 2.0;
-/// A left or right headline starts this far in from the line's corner (mm).
-const CORNER_IN: f64 = 8.0;
+
+/// Line patterns: parallel strands, no dashes. Each strand: (distance inward from the outer edge, width), both in
+/// units of the line thickness.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pattern {
+    Single,
+    Double,
+    ThickThin,
+    ThinThick,
+    /// thin – thick – thin
+    Triple,
+    /// two close together, a third further in
+    TwoAndOne,
+}
+
+impl Pattern {
+    pub const ALL: [Pattern; 6] = [Pattern::Single, Pattern::Double, Pattern::ThickThin, Pattern::ThinThick, Pattern::Triple, Pattern::TwoAndOne];
+
+    pub fn strands(self) -> &'static [(f64, f64)] {
+        match self {
+            Pattern::Single => &[(0.0, 1.0)],
+            Pattern::Double => &[(0.0, 1.0), (2.5, 1.0)],
+            Pattern::ThickThin => &[(0.0, 3.0), (4.5, 1.0)],
+            Pattern::ThinThick => &[(0.0, 1.0), (2.5, 3.0)],
+            Pattern::Triple => &[(0.0, 1.0), (2.5, 2.5), (6.5, 1.0)],
+            Pattern::TwoAndOne => &[(0.0, 1.0), (2.2, 1.0), (7.0, 1.0)],
+        }
+    }
+
+    /// Width of the whole pattern in units of the thickness.
+    pub fn extent(self) -> f64 {
+        self.strands().iter().map(|(o, w)| o + w).fold(0.0, f64::max)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {
+    /// thickness of a thin strand
     pub width_mm: f64,
-    /// distance from the edge of the paper (or of the trim area)
+    /// distance of the outer strand from the edge of the paper (or of the trim area)
     pub inset_mm: f64,
     pub color: [u8; 3],
+    pub pattern: Pattern,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,17 +69,25 @@ pub enum Align {
     Right,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum VAlign {
+    Top,
+    Middle,
+    Bottom,
+}
+
 #[derive(Clone, Debug)]
 pub struct Headline {
     pub text: String,
     pub face: Face,
     pub size_pt: f64,
     pub color: [u8; 3],
-    /// at the bottom edge instead of the top
-    pub bottom: bool,
+    /// the point of the sheet (and of the text box) it hangs at: e.g. top centre = the middle of the top edge
     pub align: Align,
-    /// distance of the headline's centre from the edge when there is no line (with a line it sits on it)
-    pub inset_mm: f64,
+    pub valign: VAlign,
+    /// moved from that point, right and down positive
+    pub dx_mm: f64,
+    pub dy_mm: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -156,35 +198,34 @@ impl Sheet {
             let (ascent, descent) = (sf.ascent() as f64, sf.descent() as f64);
             let tw = text_width(&hl.face, &hl.text, scale);
             let th = ascent - descent;
-            // centre: on the line if there is one, else at its own distance from the edge
-            let (inset, half) = match &line {
-                Some((r, t)) => (r.x - trim.x + t / 2.0, 0.0),
-                None => (self.px(hl.inset_mm), 0.0),
+            // the anchor point of the sheet, and the same point of the text box on it
+            let fx = match hl.align {
+                Align::Left => 0.0,
+                Align::Center => 0.5,
+                Align::Right => 1.0,
             };
-            let cy = if hl.bottom { trim.y + trim.h - inset - half } else { trim.y + inset + half };
-            let left = trim.x + inset + self.px(CORNER_IN);
-            let right = trim.x + trim.w - inset - self.px(CORNER_IN);
-            let x = match hl.align {
-                Align::Left => left,
-                Align::Right => right - tw,
-                Align::Center => trim.x + (trim.w - tw) / 2.0,
+            let fy = match hl.valign {
+                VAlign::Top => 0.0,
+                VAlign::Middle => 0.5,
+                VAlign::Bottom => 1.0,
             };
-            let top = cy - th / 2.0;
+            let x = trim.x + trim.w * fx - tw * fx + self.px(hl.dx_mm);
+            let top = trim.y + trim.h * fy - th * fy + self.px(hl.dy_mm);
             (Rect { x, y: top, w: tw, h: th }, top + ascent, scale)
         });
-        // the stills keep inside the line and clear of the headline
+        // the stills keep inside the line and clear of a headline at the top or bottom
         let m = self.px(self.margin_mm);
         let clear = self.px(CLEARANCE);
         let mut inset = [m; 4]; // top, right, bottom, left
-        if let Some((r, t)) = &line {
-            let need = r.x - trim.x + t + clear;
+        if let (Some((r, t)), Some(l)) = (&line, &self.line) {
+            let need = r.x - trim.x + t * l.pattern.extent() + clear;
             inset.iter_mut().for_each(|i| *i = i.max(need));
         }
         if let (Some((r, _, _)), Some(hl)) = (&text, &self.headline) {
-            if hl.bottom {
-                inset[2] = inset[2].max(trim.y + trim.h - r.y + clear);
-            } else {
-                inset[0] = inset[0].max(r.y + r.h - trim.y + clear);
+            match hl.valign {
+                VAlign::Top if r.y + r.h < trim.y + trim.h / 2.0 => inset[0] = inset[0].max(r.y + r.h - trim.y + clear),
+                VAlign::Bottom if r.y > trim.y + trim.h / 2.0 => inset[2] = inset[2].max(trim.y + trim.h - r.y + clear),
+                _ => {} // in the middle the headline lies over the stills
             }
         }
         let area = Rect {
@@ -274,6 +315,23 @@ fn fill(page: &mut RgbImage, x0: f64, y0: f64, x1: f64, y1: f64, color: [u8; 3])
     }
 }
 
+/// Fills `r` but leaves out where it meets `hole` (a horizontal edge loses a stretch of its length, a vertical
+/// edge a stretch of its height).
+fn fill_except(page: &mut RgbImage, r: Rect, hole: Option<Rect>, color: [u8; 3]) {
+    let meets = hole.filter(|h| h.x < r.x + r.w && r.x < h.x + h.w && h.y < r.y + r.h && r.y < h.y + h.h);
+    match meets {
+        None => fill(page, r.x, r.y, r.x + r.w, r.y + r.h, color),
+        Some(h) if r.w >= r.h => {
+            fill(page, r.x, r.y, h.x.max(r.x), r.y + r.h, color);
+            fill(page, (h.x + h.w).min(r.x + r.w), r.y, r.x + r.w, r.y + r.h, color);
+        }
+        Some(h) => {
+            fill(page, r.x, r.y, r.x + r.w, h.y.max(r.y), color);
+            fill(page, r.x, (h.y + h.h).min(r.y + r.h), r.x + r.w, r.y + r.h, color);
+        }
+    }
+}
+
 /// The text with its baseline at `baseline`, starting at `x`; fake bold widens the strokes, fake italic slants.
 fn draw_text(page: &mut RgbImage, hl: &Headline, x: f64, baseline: f64, scale: PxScale) {
     let font = &*hl.face.font;
@@ -325,23 +383,27 @@ pub fn render(sheet: &Sheet, n: usize, aspect: f64, mut still: impl FnMut(usize)
         };
         imageops::overlay(&mut page, &tile, x as i64, y as i64);
     }
-    if let (Some((r, t)), Some(l)) = (plan.line, &sheet.line) {
-        // a headline on the line cuts a gap into its edge
-        let gap = match (&plan.text, &sheet.headline) {
-            (Some((tr, _, _)), Some(hl)) => Some((hl.bottom, tr.x - sheet.px(BREAK_PAD), tr.x + tr.w + sheet.px(BREAK_PAD))),
-            _ => None,
-        };
-        let horizontal = |page: &mut RgbImage, y: f64, bottom: bool| match gap {
-            Some((b, g0, g1)) if b == bottom => {
-                fill(page, r.x, y, g0.max(r.x), y + t, l.color);
-                fill(page, g1.min(r.x + r.w), y, r.x + r.w, y + t, l.color);
+    if let (Some((outer, t)), Some(l)) = (plan.line, &sheet.line) {
+        // the headline cuts a gap into every strand it covers
+        let hole = plan.text.map(|(tr, _, _)| {
+            let p = sheet.px(BREAK_PAD);
+            Rect { x: tr.x - p, y: tr.y - p, w: tr.w + 2.0 * p, h: tr.h + 2.0 * p }
+        });
+        for (off, width) in l.pattern.strands() {
+            let (o, sw) = (off * t, (width * t).max(1.0));
+            let r = Rect { x: outer.x + o, y: outer.y + o, w: outer.w - 2.0 * o, h: outer.h - 2.0 * o };
+            if r.w <= 2.0 * sw || r.h <= 2.0 * sw {
+                continue;
             }
-            _ => fill(page, r.x, y, r.x + r.w, y + t, l.color),
-        };
-        horizontal(&mut page, r.y, false);
-        horizontal(&mut page, r.y + r.h - t, true);
-        fill(&mut page, r.x, r.y, r.x + t, r.y + r.h, l.color);
-        fill(&mut page, r.x + r.w - t, r.y, r.x + r.w, r.y + r.h, l.color);
+            for edge in [
+                Rect { x: r.x, y: r.y, w: r.w, h: sw },
+                Rect { x: r.x, y: r.y + r.h - sw, w: r.w, h: sw },
+                Rect { x: r.x, y: r.y, w: sw, h: r.h },
+                Rect { x: r.x + r.w - sw, y: r.y, w: sw, h: r.h },
+            ] {
+                fill_except(&mut page, edge, hole, l.color);
+            }
+        }
     }
     if let (Some((tr, baseline, scale)), Some(hl)) = (plan.text, &sheet.headline) {
         draw_text(&mut page, hl, tr.x, baseline, scale);
@@ -428,30 +490,43 @@ mod tests {
         assert_eq!(page.get_pixel((p.trim.x - 10.0) as u32, y), &Rgb([255, 255, 255]));
     }
 
+    fn face() -> Option<crate::fonts::Face> {
+        crate::fonts::face("Helvetica", false, false).or_else(|| crate::fonts::face(crate::fonts::families().first()?, false, false))
+    }
+
     #[test]
-    fn line_breaks_around_the_headline_and_the_stills_keep_clear() {
-        let Some(face) = crate::fonts::face("Helvetica", false, false).or_else(|| crate::fonts::face(&crate::fonts::families()[0], false, false)) else {
-            return; // no fonts (not on a Mac)
-        };
-        let s = Sheet {
-            margin_mm: 5.0,
-            line: Some(Line { width_mm: 0.5, inset_mm: 8.0, color: [0, 0, 0] }),
-            headline: Some(Headline { text: "Rough Cut 3".into(), face, size_pt: 24.0, color: [200, 0, 0], bottom: false, align: Align::Center, inset_mm: 8.0 }),
-            ..a4(None)
-        };
+    fn headline_hangs_at_its_anchor_and_breaks_only_a_line_it_covers() {
+        let Some(face) = face() else { return }; // no fonts (not on a Mac)
+        let hl = |dy: f64| Headline { text: "Rough Cut 3".into(), face: face.clone(), size_pt: 24.0, color: [200, 0, 0], align: Align::Center, valign: VAlign::Top, dx_mm: 0.0, dy_mm: dy };
+        let line = Line { width_mm: 0.5, inset_mm: 8.0, color: [0, 0, 0], pattern: Pattern::Single };
+        // 20 mm down from the middle of the top edge: below the line, the line stays whole
+        let s = Sheet { margin_mm: 5.0, line: Some(line.clone()), headline: Some(hl(20.0)), ..a4(None) };
         let p = s.plan();
         let (tr, _, _) = p.text.unwrap();
-        // centred on the line (80 px in, 5 px thick → centre 82.5)
-        assert!((tr.y + tr.h / 2.0 - 82.5).abs() < 1.0);
-        assert!((tr.x + tr.w / 2.0 - 1050.0).abs() < 1.0);
-        // stills start below the headline and inside the line, though the margin is only 5 mm
-        assert!(p.area.y >= tr.y + tr.h);
-        assert!(p.area.x >= 80.0 + 5.0);
+        assert!((tr.y - 200.0).abs() < 1e-6);
+        assert!((tr.x + tr.w / 2.0 - 1050.0).abs() < 1e-6);
+        assert!(p.area.y >= tr.y + tr.h, "stills below the headline");
         let page = render(&s, 0, 1.0, |_| None);
-        let y = 82;
-        assert_eq!(page.get_pixel(200, y), &Rgb([0, 0, 0]), "line left of the text");
-        assert_eq!(page.get_pixel((tr.x - 10.0) as u32, y), &Rgb([255, 255, 255]), "gap before the text");
-        assert!((tr.x as u32..(tr.x + tr.w) as u32).any(|x| page.get_pixel(x, y)[0] > 150 && page.get_pixel(x, y)[1] < 100), "red text");
+        assert_eq!(page.get_pixel(1050, 82), &Rgb([0, 0, 0]), "line whole above the headline");
+        // moved onto the line: the line breaks under the text
+        let mut s2 = s.clone();
+        // centre the text on the line (82.5 px = 8.25 mm; 10 px per mm)
+        s2.headline = Some(hl((82.5 - tr.h / 2.0) / 10.0));
+        let (tr2, _, _) = s2.plan().text.unwrap();
+        assert!(tr2.y < 82.0 && tr2.y + tr2.h > 82.0);
+        let page = render(&s2, 0, 1.0, |_| None);
+        assert_eq!(page.get_pixel((tr2.x - 10.0) as u32, 82), &Rgb([255, 255, 255]), "gap before the text");
+        assert_eq!(page.get_pixel(200, 82), &Rgb([0, 0, 0]), "line goes on beside it");
+    }
+
+    #[test]
+    fn patterns_draw_their_strands_and_keep_the_stills_inside() {
+        // 10 px per mm, 1 mm strands: Two-and-one = strands at 0, 22, 70 px in from 80 px
+        let s = Sheet { margin_mm: 1.0, line: Some(Line { width_mm: 1.0, inset_mm: 8.0, color: [0, 0, 0], pattern: Pattern::TwoAndOne }), ..a4(None) };
+        let page = render(&s, 0, 1.0, |_| None);
+        let at = |x: u32| page.get_pixel(x, 1500)[0];
+        assert_eq!((at(85), at(95), at(105), at(125), at(155)), (0, 255, 0, 255, 0));
+        assert!(s.plan().area.x >= 80.0 + 80.0);
     }
 
     #[test]

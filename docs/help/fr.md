@@ -42,7 +42,9 @@ Les très grandes planches (A0 à 600 dpi) demandent beaucoup de mémoire pour l
 
 ## Cadre, titre et traits de coupe
 
-La colonne latérale a trois onglets : Source, Planche et Mise en page. Sous Mise en page, Cadre trace un trait autour de la planche ; réglez son épaisseur, sa distance au bord et sa couleur (noir au départ ; une pastille ou une valeur hexadécimale comme #3c4146). Titre ajoute un titre : police parmi celles de votre Mac, taille en points, gras, italique, couleur et position (en haut ou en bas, à gauche, au centre ou à droite). Avec un cadre, le titre se place sur le trait et le trait s’interrompt autour de lui. Les images restent toujours à distance du cadre et du titre.
+La colonne latérale a quatre onglets : Source, Planche, Cadre et Titre. Sous Cadre, l’option Cadre trace un trait autour de la planche : choisissez un motif (simple, double, épais – fin, fin – épais, fin – épais – fin, deux proches et un écarté), l’épaisseur d’un trait fin, la distance au bord et la couleur (noir au départ ; une pastille ou une valeur hexadécimale comme #3c4146).
+
+Sous Titre, saisissez le titre. La liste des polices montre chaque police de votre Mac avec son propre dessin ; ↑ et ↓ la parcourent et la planche suit aussitôt, une lettre saute à la police suivante qui commence ainsi. Puis taille en points, gras, italique et couleur. L’ancre est le point de la planche auquel le titre est accroché – l’un des neuf, comme dans un logiciel d’image ; X et Y le déplacent depuis là en mm. Vous pouvez aussi faire glisser le titre dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt autour de lui. En haut ou en bas, les images gardent leur distance ; au milieu, il passe par-dessus.
 
 Planche › Traits de coupe met la planche en page dans une zone au format de l’image à l’intérieur du papier – pour des images en 2:1, une zone en 2:1 – et place des traits de coupe à ses coins pour la découper.
 

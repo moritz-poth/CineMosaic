@@ -42,7 +42,9 @@ Sehr große Bögen (A0 mit 600 dpi) brauchen zum Speichern viel Arbeitsspeicher;
 
 ## Rahmenlinie, Headline und Schnittmarken
 
-Die Seitenspalte hat drei Reiter: Quelle, Bogen und Gestaltung. Unter Gestaltung zieht Rahmenlinie eine Linie um den Bogen; stelle Dicke, Abstand zum Rand und Farbe ein (zuerst Schwarz; ein Farbfeld oder ein Hex-Wert wie #3c4146). Headline setzt einen Titel: Schrift aus den Schriften deines Macs, Größe in Punkt, fett, kursiv, Farbe und Position (oben oder unten, links, Mitte oder rechts). Mit Rahmenlinie sitzt die Headline auf der Linie, und die Linie ist um sie herum unterbrochen. Die Stills halten immer Abstand zu Linie und Headline.
+Die Seitenspalte hat vier Reiter: Quelle, Bogen, Linie und Headline. Unter Linie zieht Rahmenlinie eine Linie um den Bogen: wähle ein Muster (einfach, doppelt, dick – dünn, dünn – dick, dünn – dick – dünn, zwei nah und eine weiter), die Dicke einer dünnen Linie, den Abstand zum Rand und die Farbe (zuerst Schwarz; ein Farbfeld oder ein Hex-Wert wie #3c4146).
+
+Unter Headline tippst du den Titel. Die Schriftliste zeigt jede Schrift deines Macs in ihrem eigenen Aussehen; ↑ und ↓ blättern durch, der Bogen folgt sofort, ein Buchstabe springt zur nächsten Schrift mit diesem Anfang. Dann Größe in Punkt, fett, kursiv und Farbe. Der Anker ist der Punkt des Bogens, an dem die Headline hängt – einer von neun, wie in einem Bildprogramm; X und Y verschieben sie von dort in mm. Du kannst die Headline auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie um sie herum unterbrochen. Oben oder unten halten die Stills Abstand; in der Mitte liegt sie über ihnen.
 
 Bogen › Schnittmarken legt den Bogen in einer Fläche im Bildformat innerhalb des Papiers an – bei Stills in 2:1 eine Fläche in 2:1 – und setzt Schnittmarken an ihre Ecken, damit du sie ausschneiden kannst.
 

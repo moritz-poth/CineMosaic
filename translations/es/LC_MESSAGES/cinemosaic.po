@@ -344,17 +344,11 @@ msgstr "Ajustar toda la hoja"
 msgid "Sheet"
 msgstr "Hoja"
 
-msgid "Design"
-msgstr "Diseño"
-
 msgid "Crop marks"
 msgstr "Marcas de corte"
 
 msgid "The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out."
 msgstr "La hoja se compone en una zona con el formato de imagen dentro del papel, con marcas de corte en las esquinas para recortarla."
-
-msgid "LINE"
-msgstr "LÍNEA"
 
 msgid "Frame line"
 msgstr "Línea de marco"
@@ -383,9 +377,6 @@ msgstr "Blanco"
 msgid "Red"
 msgstr "Rojo"
 
-msgid "HEADLINE"
-msgstr "TÍTULO"
-
 msgid "Headline"
 msgstr "Título"
 
@@ -403,9 +394,6 @@ msgstr "Negrita"
 
 msgid "Italic"
 msgstr "Cursiva"
-
-msgid "Position"
-msgstr "Posición"
 
 msgid "Top left"
 msgstr "Arriba a la izquierda"
@@ -425,8 +413,47 @@ msgstr "Abajo en el centro"
 msgid "Bottom right"
 msgstr "Abajo a la derecha"
 
-msgid "The headline sits on the frame line; the line breaks around it."
-msgstr "El título se sitúa sobre la línea de marco; la línea se interrumpe a su alrededor."
+msgid "Line"
+msgstr "Línea"
 
-msgid "Without a frame line the headline sits at the line's distance from the edge."
-msgstr "Sin línea de marco, el título se sitúa a la distancia de la línea al borde."
+msgid "Pattern"
+msgstr "Patrón"
+
+msgid "Single"
+msgstr "Simple"
+
+msgid "Double"
+msgstr "Doble"
+
+msgid "Thick – thin"
+msgstr "Grueso – fino"
+
+msgid "Thin – thick"
+msgstr "Fino – grueso"
+
+msgid "Thin – thick – thin"
+msgstr "Fino – grueso – fino"
+
+msgid "Two close, one apart"
+msgstr "Dos juntas, una aparte"
+
+msgid "Anchor"
+msgstr "Ancla"
+
+msgid "Middle left"
+msgstr "En medio a la izquierda"
+
+msgid "Centre"
+msgstr "Centro"
+
+msgid "Middle right"
+msgstr "En medio a la derecha"
+
+msgid "Move right"
+msgstr "Mover a la derecha"
+
+msgid "Move down"
+msgstr "Mover hacia abajo"
+
+msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
+msgstr "El ancla es el punto de la hoja del que cuelga el título; X e Y lo mueven desde ahí. También puedes arrastrarlo en la vista previa. Donde cubre la línea de marco, la línea se interrumpe."

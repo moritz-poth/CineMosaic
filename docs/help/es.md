@@ -42,7 +42,9 @@ Las hojas muy grandes (A0 a 600 dpi) necesitan mucha memoria para guardarse; la 
 
 ## Línea de marco, título y marcas de corte
 
-La columna lateral tiene tres pestañas: Origen, Hoja y Diseño. En Diseño, Línea de marco dibuja una línea alrededor de la hoja; ajusta su grosor, su distancia al borde y su color (negro al principio; una muestra o un valor hexadecimal como #3c4146). Título añade un título: fuente de entre las de tu Mac, tamaño en puntos, negrita, cursiva, color y posición (arriba o abajo, a la izquierda, en el centro o a la derecha). Con línea de marco, el título se sitúa sobre la línea y la línea se interrumpe a su alrededor. Los fotogramas siempre guardan distancia con la línea y el título.
+La columna lateral tiene cuatro pestañas: Origen, Hoja, Línea y Título. En Línea, Línea de marco dibuja una línea alrededor de la hoja: elige un patrón (simple, doble, grueso – fino, fino – grueso, fino – grueso – fino, dos juntas y una aparte), el grosor de una línea fina, la distancia al borde y el color (negro al principio; una muestra o un valor hexadecimal como #3c4146).
+
+En Título escribe el título. La lista de fuentes muestra cada fuente de tu Mac con su propio aspecto; ↑ y ↓ la recorren y la hoja cambia al momento, una letra salta a la siguiente fuente que empieza así. Después tamaño en puntos, negrita, cursiva y color. El ancla es el punto de la hoja del que cuelga el título, uno de nueve, como en un programa de imagen; X e Y lo mueven desde ahí en mm. También puedes arrastrar el título en la vista previa. Donde cubre la línea de marco, la línea se interrumpe a su alrededor. Arriba o abajo, los fotogramas guardan distancia; en el centro queda por encima de ellos.
 
 Hoja › Marcas de corte compone la hoja en una zona con el formato de imagen dentro del papel –para fotogramas en 2:1, una zona en 2:1– y pone marcas de corte en sus esquinas para recortarla.
 

@@ -566,7 +566,12 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
     }
     let inset = num(&app.get_line_inset(), 0.0, 200.0, "line-inset")?;
     sheet.line = if app.get_line_on() {
-        Some(layout::Line { width_mm: num(&app.get_line_width(), 0.05, 20.0, "line-width")?, inset_mm: inset, color: line_color.ok_or("line-color")? })
+        Some(layout::Line {
+            width_mm: num(&app.get_line_width(), 0.05, 20.0, "line-width")?,
+            inset_mm: inset,
+            color: line_color.ok_or("line-color")?,
+            pattern: layout::Pattern::ALL[(app.get_line_pattern().max(0) as usize).min(layout::Pattern::ALL.len() - 1)],
+        })
     } else {
         None
     };
@@ -585,13 +590,12 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
             FACES.with(|c| c.borrow_mut().entry((fam.clone(), bold, italic)).or_insert_with(|| cinemosaic::fonts::face(&fam, bold, italic)).clone())
         });
         if let Some(face) = face {
-            let pos = app.get_head_pos();
-            let align = match pos % 3 {
-                0 => layout::Align::Left,
-                1 => layout::Align::Center,
-                _ => layout::Align::Right,
-            };
-            sheet.headline = Some(layout::Headline { text, face, size_pt: size, color, bottom: pos >= 3, align, inset_mm: inset });
+            let anchor = app.get_head_anchor().clamp(0, 8);
+            let align = [layout::Align::Left, layout::Align::Center, layout::Align::Right][anchor as usize % 3];
+            let valign = [layout::VAlign::Top, layout::VAlign::Middle, layout::VAlign::Bottom][anchor as usize / 3];
+            let dx_mm = num(&app.get_head_dx(), -2000.0, 2000.0, "head-dx")?;
+            let dy_mm = num(&app.get_head_dy(), -2000.0, 2000.0, "head-dy")?;
+            sheet.headline = Some(layout::Headline { text, face, size_pt: size, color, align, valign, dx_mm, dy_mm });
         }
     }
     Ok(())
@@ -669,6 +673,17 @@ fn refresh(app: &AppWindow) {
             info += &tr([" · needs about {} GB of memory to save", " · Speichern braucht etwa {} GB Arbeitsspeicher", " · l’enregistrement demande environ {} Go de mémoire", " · guardar necesita unos {} GB de memoria"]).replace("{}", &format!("{gb:.1}"));
         }
         app.set_sheet_info(info.into());
+        // where the headline is, for dragging it in the preview
+        app.set_page_w_mm(sheet.width_mm as f32);
+        match sheet.plan().text {
+            Some((r, _, _)) => {
+                app.set_head_bx((r.x / w as f64) as f32);
+                app.set_head_by((r.y / h as f64) as f32);
+                app.set_head_bw((r.w / w as f64) as f32);
+                app.set_head_bh((r.h / h as f64) as f32);
+            }
+            None => app.set_head_bw(0.0),
+        }
         // zoomed in, the preview is drawn sharper – never finer than the sheet itself, at most 8000 px
         let real = w.max(h) as f64;
         let long = (PREVIEW_PX * app.get_zoom() as f64).min(real).clamp(PREVIEW_PX, 8000.0);
@@ -1304,6 +1319,30 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     app.on_cancel(|| STATE.with(|st| st.borrow().gate.cancel.store(true, Ordering::Relaxed)));
+    // headline anchor: a sensible move for the new point (inside the sheet), then draw
+    app.on_anchor_chosen({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_head_anchor(i);
+            app.set_head_dx(["10", "0", "-10"][i as usize % 3].into());
+            app.set_head_dy(["8", "0", "-8"][(i as usize / 3).min(2)].into());
+            refresh(&app);
+        }
+    });
+    // a letter in the font list: the next family starting with it (after the current one, wrapping round)
+    app.on_jump_font({
+        let weak = app.as_weak();
+        move |text| {
+            let Some(app) = weak.upgrade() else { return -1 };
+            let key = text.to_lowercase();
+            FONTS.with(|f| {
+                let f = f.borrow();
+                let start = app.get_font().max(0) as usize + 1;
+                (0..f.len()).map(|k| (start + k) % f.len()).find(|&k| f[k].to_lowercase().starts_with(&key)).map_or(-1, |k| k as i32)
+            })
+        }
+    });
     // zoom: draw a sharper preview once the zoom has rested for a moment
     let zoom_timer = Rc::new(slint::Timer::default());
     app.on_zoom_changed({

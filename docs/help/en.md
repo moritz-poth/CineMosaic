@@ -42,7 +42,9 @@ Very large sheets (A0 at 600 dpi) need a lot of memory to save; the line below t
 
 ## Frame line, headline and crop marks
 
-The side column has three tabs: Source, Sheet and Design. Under Design, Frame line draws a line around the sheet; set its thickness, its distance from the edge and its colour (black at first; a swatch or a hex value like #3c4146). Headline adds a title: choose the font from the fonts of your Mac, the size in points, bold, italic, the colour and the position (top or bottom, left, centre or right). With a frame line the headline sits on the line and the line breaks around it. The stills always keep clear of line and headline.
+The side column has four tabs: Source, Sheet, Line and Headline. Under Line, Frame line draws a line around the sheet: choose a pattern (single, double, thick – thin, thin – thick, thin – thick – thin, two close and one apart), the thickness of a thin strand, the distance from the edge and the colour (black at first; a swatch or a hex value like #3c4146).
+
+Under Headline, type the title. The font list shows every font of your Mac in its own look; ↑ and ↓ step through it and the sheet follows at once, a letter jumps to the next font starting with it. Then size in points, bold, italic and colour. The anchor is the point of the sheet the headline hangs at – one of nine, like in an image editor; X and Y move it from there in mm. You can also drag the headline in the preview. Where it covers the frame line, the line breaks around it. A headline at the top or bottom keeps the stills clear; in the middle it lies over them.
 
 Sheet › Crop marks lays the sheet out in an area of the picture format inside the paper – for stills in 2:1 an area of 2:1 – and puts crop marks at its corners, so you can cut it out.
 

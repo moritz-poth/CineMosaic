@@ -344,17 +344,11 @@ msgstr "Ganzen Bogen einpassen"
 msgid "Sheet"
 msgstr "Bogen"
 
-msgid "Design"
-msgstr "Gestaltung"
-
 msgid "Crop marks"
 msgstr "Schnittmarken"
 
 msgid "The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out."
 msgstr "Der Bogen wird in einer Fläche im Bildformat innerhalb des Papiers angelegt, mit Schnittmarken an den Ecken zum Ausschneiden."
-
-msgid "LINE"
-msgstr "LINIE"
 
 msgid "Frame line"
 msgstr "Rahmenlinie"
@@ -383,9 +377,6 @@ msgstr "Weiß"
 msgid "Red"
 msgstr "Rot"
 
-msgid "HEADLINE"
-msgstr "HEADLINE"
-
 msgid "Headline"
 msgstr "Headline"
 
@@ -403,9 +394,6 @@ msgstr "Fett"
 
 msgid "Italic"
 msgstr "Kursiv"
-
-msgid "Position"
-msgstr "Position"
 
 msgid "Top left"
 msgstr "Oben links"
@@ -425,8 +413,47 @@ msgstr "Unten Mitte"
 msgid "Bottom right"
 msgstr "Unten rechts"
 
-msgid "The headline sits on the frame line; the line breaks around it."
-msgstr "Die Headline sitzt auf der Rahmenlinie; die Linie ist um sie herum unterbrochen."
+msgid "Line"
+msgstr "Linie"
 
-msgid "Without a frame line the headline sits at the line's distance from the edge."
-msgstr "Ohne Rahmenlinie steht die Headline im Abstand der Linie zum Rand."
+msgid "Pattern"
+msgstr "Muster"
+
+msgid "Single"
+msgstr "Einfach"
+
+msgid "Double"
+msgstr "Doppelt"
+
+msgid "Thick – thin"
+msgstr "Dick – dünn"
+
+msgid "Thin – thick"
+msgstr "Dünn – dick"
+
+msgid "Thin – thick – thin"
+msgstr "Dünn – dick – dünn"
+
+msgid "Two close, one apart"
+msgstr "Zwei nah, eine weiter"
+
+msgid "Anchor"
+msgstr "Anker"
+
+msgid "Middle left"
+msgstr "Mitte links"
+
+msgid "Centre"
+msgstr "Mitte"
+
+msgid "Middle right"
+msgstr "Mitte rechts"
+
+msgid "Move right"
+msgstr "Nach rechts verschieben"
+
+msgid "Move down"
+msgstr "Nach unten verschieben"
+
+msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
+msgstr "Der Anker ist der Punkt des Bogens, an dem die Headline hängt; X und Y verschieben sie von dort. Du kannst sie auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie unterbrochen."
