@@ -74,6 +74,8 @@ pub struct Bin {
     pub items: Vec<usize>,
     pub comps: HashMap<u32, Component>,
     by_id: HashMap<MobId, usize>,
+    /// sequence lengths, worked out once when the bin is read
+    lengths: HashMap<u32, i64>,
 }
 
 type Res<T> = Result<T, String>;
@@ -530,6 +532,7 @@ impl Bin {
             }
         }
         bin.by_id = bin.mobs.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
+        bin.lengths = bin.all_lengths();
         Ok(bin)
     }
 
@@ -583,22 +586,46 @@ impl Bin {
 
     /// Length of a component; a sequence's transitions overlap their neighbours.
     pub fn length(&self, obj: u32) -> i64 {
-        self.length_in(obj, 0)
+        match self.lengths.get(&obj) {
+            Some(&l) => l,
+            None => self.length_memo(obj, 0, &mut HashMap::new(), &mut std::collections::HashSet::new()),
+        }
     }
 
-    /// `depth` stops a broken or crafted bin whose sequences contain themselves.
-    fn length_in(&self, obj: u32, depth: u32) -> i64 {
-        if depth > MAX_DEPTH {
-            return 0;
+    /// Every sequence's length, each component counted once: a crafted bin that nests the same sequence many
+    /// times over would otherwise double the work at every level.
+    fn all_lengths(&self) -> HashMap<u32, i64> {
+        let mut memo = HashMap::new();
+        let seqs: Vec<u32> = self.comps.iter().filter(|(_, c)| matches!(c.part, Part::Sequence(_))).map(|(&k, _)| k).collect();
+        for k in seqs {
+            self.length_memo(k, 0, &mut memo, &mut std::collections::HashSet::new());
         }
-        match self.comps.get(&obj) {
-            Some(Component { part: Part::Sequence(parts), .. }) => parts
-                .iter()
-                .map(|&p| if self.is_transition(p) { -self.length_in(p, depth + 1) } else { self.length_in(p, depth + 1) })
-                .fold(0i64, |a, b| a.saturating_add(b)),
+        memo
+    }
+
+    /// Length with a memo; a sequence that contains itself (or nesting past MAX_DEPTH) counts 0.
+    fn length_memo(&self, obj: u32, depth: u32, memo: &mut HashMap<u32, i64>, open: &mut std::collections::HashSet<u32>) -> i64 {
+        if let Some(&l) = memo.get(&obj) {
+            return l;
+        }
+        let l = match self.comps.get(&obj) {
+            Some(Component { part: Part::Sequence(parts), .. }) => {
+                if depth > MAX_DEPTH || !open.insert(obj) {
+                    return 0;
+                }
+                let mut sum = 0i64;
+                for &p in parts {
+                    let l = self.length_memo(p, depth + 1, memo, open);
+                    sum = sum.saturating_add(if self.is_transition(p) { -l } else { l });
+                }
+                open.remove(&obj);
+                sum
+            }
             Some(c) => c.length,
             None => 0,
-        }
+        };
+        memo.insert(obj, l);
+        l
     }
 
     fn is_transition(&self, obj: u32) -> bool {
@@ -792,6 +819,14 @@ mod tests {
         b.comps.insert(1, comp(Part::Sequence(vec![1, 2]), 0));
         b.comps.insert(2, comp(Part::Clip, 10));
         assert!(b.length(1) >= 0);
+        // 60 levels, each holding the level below twice: 2^60 without the memo
+        for i in 200..260u32 {
+            b.comps.insert(i, comp(Part::Sequence(vec![i + 1, i + 1]), 0));
+        }
+        b.comps.insert(260, comp(Part::Clip, 1));
+        let t0 = std::time::Instant::now();
+        b.lengths = b.all_lengths();
+        assert!(b.length(200) >= 0 && t0.elapsed().as_secs() < 1);
         assert!(!matches!(b.resolve(1, 3, &[]), Hit::Media { .. }));
         // 40 levels of effects with 4 inputs each, all pointing at the next level: 4^40 paths without a budget
         for i in 100..140u32 {
