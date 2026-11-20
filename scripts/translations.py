@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Writes translations/<de|fr|es>/LC_MESSAGES/cinemosaic.po from the table below and checks that every
+@tr() in ui/app.slint has an entry (copied from MediaFiles Check). Usage: python3 scripts/translations.py"""
+import re, sys, pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+LANGS = ["de", "fr", "es"]
+PLURAL = {"de": "nplurals=2; plural=(n != 1);", "fr": "nplurals=2; plural=(n > 1);", "es": "nplurals=2; plural=(n != 1);"}
+
+# English: (German, French, Spanish)
+T = {
+    'Checking for updates…': ('Suche nach Updates…', 'Recherche de mises à jour…', 'Buscando actualizaciones…'),
+    'CineMosaic is up to date.': ('CineMosaic ist aktuell.', 'CineMosaic est à jour.', 'CineMosaic está actualizado.'),
+    'Installing the update – CineMosaic restarts by itself.': ('Update wird installiert – CineMosaic startet von selbst neu.', 'Installation de la mise à jour – CineMosaic redémarre tout seul.', 'Instalando la actualización: CineMosaic se reinicia solo.'),
+    'Could not check for updates. Check the internet connection and try again.': ('Nach Updates suchen hat nicht geklappt. Prüfe die Internetverbindung und versuche es noch einmal.', 'Impossible de rechercher des mises à jour. Vérifiez la connexion Internet et réessayez.', 'No se pudieron buscar actualizaciones. Comprueba la conexión a Internet y vuelve a intentarlo.'),
+    'The update could not be downloaded. Check the internet connection and try again.': ('Das Update ließ sich nicht laden. Prüfe die Internetverbindung und versuche es noch einmal.', "La mise à jour n'a pas pu être téléchargée. Vérifiez la connexion Internet et réessayez.", 'No se pudo descargar la actualización. Comprueba la conexión a Internet y vuelve a intentarlo.'),
+    'The downloaded update is damaged. Please try again later or download it from GitHub.': ('Das geladene Update ist beschädigt. Versuche es später noch einmal oder lade es von GitHub.', 'La mise à jour téléchargée est endommagée. Réessayez plus tard ou téléchargez-la sur GitHub.', 'La actualización descargada está dañada. Inténtalo más tarde o descárgala de GitHub.'),
+    'CineMosaic could not replace itself. Move it to the Applications folder, or download the update from GitHub. Details: {}': ('CineMosaic konnte sich nicht ersetzen. Lege die App in den Ordner Programme oder lade das Update von GitHub. Details: {}', "CineMosaic n'a pas pu se remplacer. Placez l'app dans le dossier Applications ou téléchargez la mise à jour sur GitHub. Détails : {}", 'CineMosaic no pudo reemplazarse. Mueve la app a la carpeta Aplicaciones o descarga la actualización de GitHub. Detalles: {}'),
+    'The update is installed. Quit CineMosaic and open it again to finish.': ('Das Update ist installiert. Beende CineMosaic und öffne es erneut, um abzuschließen.', 'La mise à jour est installée. Quittez CineMosaic et rouvrez-le pour terminer.', 'La actualización está instalada. Cierra CineMosaic y vuelve a abrirlo para terminar.'),
+    'Version {} is available.': ('Version {} ist verfügbar.', 'La version {} est disponible.', 'La versión {} está disponible.'),
+    "What's new": ('Neuigkeiten', 'Nouveautés', 'Novedades'),
+    'Install update': ('Update installieren', 'Installer la mise à jour', 'Instalar actualización'),
+    'Help': ('Hilfe', 'Aide', 'Ayuda'),
+    'CineMosaic Manual': ('CineMosaic Anleitung', 'Manuel de CineMosaic', 'Manual de CineMosaic'),
+    'Show Log File': ('Logdatei zeigen', 'Afficher le fichier journal', 'Mostrar archivo de registro'),
+    'needs attention': ('braucht Aufmerksamkeit', 'demande votre attention', 'requiere atención'),
+    'General': ('Allgemein', 'Général', 'General'),
+    'Updates': ('Updates', 'Mises à jour', 'Actualizaciones'),
+    'Support': ('Support', 'Assistance', 'Soporte'),
+    'About': ('Über', 'À propos', 'Acerca de'),
+    'Light/Dark': ('Hell/Dunkel', 'Clair/Sombre', 'Claro/Oscuro'),
+    'Switches all windows of CineMosaic between a light and a dark look.': ('Schaltet alle Fenster von CineMosaic zwischen hellem und dunklem Aussehen um.', 'Fait passer toutes les fenêtres de CineMosaic entre un aspect clair et sombre.', 'Cambia todas las ventanas de CineMosaic entre un aspecto claro y oscuro.'),
+    'Language': ('Sprache', 'Langue', 'Idioma'),
+    'Version {}': ('Version {}', 'Version {}', 'Versión {}'),
+    'Check for updates': ('Nach Updates suchen', 'Rechercher des mises à jour', 'Buscar actualizaciones'),
+    'CineMosaic checks GitHub for new versions on its own and shows a notice.': ('CineMosaic sucht selbst auf GitHub nach neuen Versionen und zeigt dann einen Hinweis.', 'CineMosaic recherche lui-même les nouvelles versions sur GitHub et affiche un avis.', 'CineMosaic busca por sí mismo nuevas versiones en GitHub y muestra un aviso.'),
+    'Get test versions': ('Testversionen erhalten', 'Recevoir les versions de test', 'Recibir versiones de prueba'),
+    'Also offers versions that are still being tested. For testers only – they can contain errors.': ('Bietet auch Versionen an, die noch getestet werden. Nur für Tester – sie können Fehler enthalten.', 'Propose aussi des versions encore en test. Réservé aux testeurs – elles peuvent contenir des erreurs.', 'Ofrece también versiones aún en prueba. Solo para testers: pueden contener errores.'),
+    'Self-test running…': ('Selbsttest läuft…', 'Autotest en cours…', 'Autoprueba en curso…'),
+    'Test this Mac': ('Diesen Mac testen', 'Tester ce Mac', 'Probar este Mac'),
+    'Run self-test…': ('Selbsttest…', 'Autotest…', 'Autoprueba…'),
+    'Problem or idea?': ('Problem oder Idee?', 'Un problème, une idée ?', '¿Problema o idea?'),
+    'Report…': ('Melden…', 'Signaler…', 'Informar…'),
+    'No GitHub account needed.': ('Kein GitHub-Konto nötig.', 'Pas besoin de compte GitHub.', 'No hace falta cuenta de GitHub.'),
+    'Events and errors': ('Ereignisse und Fehler', 'Événements et erreurs', 'Eventos y errores'),
+    'Show log file': ('Logdatei zeigen', 'Afficher le journal', 'Ver registro'),
+    'Like CineMosaic?': ('Gefällt dir CineMosaic?', 'CineMosaic vous plaît ?', '¿Te gusta CineMosaic?'),
+    'Buy me a coffee': ('Spendier mir einen Kaffee', 'Offrez-moi un café', 'Invítame a un café'),
+    'If you use CineMosaic and like it, I would be glad if you bought me a coffee.': ('Wenn du CineMosaic nutzt und es dir gefällt, freue ich mich, wenn du mir einen Kaffee spendierst.', 'Si vous utilisez CineMosaic et qu’il vous plaît, je serais ravi que vous m’offriez un café.', 'Si usas CineMosaic y te gusta, me alegraría que me invitaras a un café.'),
+    'SELF-TEST': ('SELBSTTEST', 'AUTOTEST', 'AUTOPRUEBA'),
+    'Passed': ('Bestanden', 'Réussi', 'Superada'),
+    'Failed': ('Fehlgeschlagen', 'Échoué', 'Fallida'),
+    'Skipped': ('Übersprungen', 'Ignoré', 'Omitida'),
+    'Only anonymous data is sent: system, test results and the log with user and folder names replaced. Save the report to look at it first.': ('Gesendet werden nur anonyme Daten: System, Testergebnisse und das Log, darin Benutzer- und Ordnernamen ersetzt. Zum Ansehen den Bericht vorher speichern.', 'Seules des données anonymes sont envoyées : système, résultats et journal, avec noms d’utilisateur et de dossiers remplacés. Enregistrez le rapport pour le consulter d’abord.', 'Solo se envían datos anónimos: sistema, resultados y el registro con nombres de usuario y carpetas sustituidos. Guarda el informe para verlo antes.'),
+    'Hide': ('Ausblenden', 'Masquer', 'Ocultar'),
+    'Back': ('Zurück', 'Retour', 'Atrás'),
+    'Start self-test': ('Selbsttest starten', 'Lancer l’autotest', 'Iniciar autoprueba'),
+    'Save report': ('Speichern', 'Enregistrer', 'Guardar'),
+    'Sending…': ('Wird gesendet…', 'Envoi…', 'Enviando…'),
+    'Send report': ('Bericht senden', 'Envoyer', 'Enviar informe'),
+    'REPORT A PROBLEM': ('PROBLEM MELDEN', 'SIGNALER UN PROBLÈME', 'INFORMAR DE UN PROBLEMA'),
+    'What happened, and what did you expect? Ideas are welcome too. No GitHub account needed.': ('Was ist passiert, und was hast du erwartet? Ideen sind auch willkommen. Kein GitHub-Konto nötig.', 'Que s’est-il passé, et qu’attendiez-vous ? Les idées sont aussi les bienvenues. Pas besoin de compte GitHub.', '¿Qué pasó y qué esperabas? Las ideas también son bienvenidas. No hace falta cuenta de GitHub.'),
+    'Description': ('Beschreibung', 'Description', 'Descripción'),
+    'Email for questions (optional)': ('E-Mail für Rückfragen (optional)', 'E-mail pour vous recontacter (facultatif)', 'Correo para preguntas (opcional)'),
+    'Attach system info and log file': ('Systeminfo und Logdatei anhängen', 'Joindre infos système et journal', 'Adjuntar información del sistema y registro'),
+    'Anonymized: your user name and folder names are replaced.': ('Anonymisiert: Dein Benutzername und Ordnernamen werden ersetzt.', 'Anonymisé : votre nom d’utilisateur et les noms de dossiers sont remplacés.', 'Anonimizado: tu nombre de usuario y los nombres de carpetas se sustituyen.'),
+    'Send': ('Senden', 'Envoyer', 'Enviar'),
+    'CineMosaic is free software: you can redistribute and modify it under the terms of the GNU General Public License, version 3 or later.': ('CineMosaic ist freie Software: Du darfst sie unter den Bedingungen der GNU General Public License, Version 3 oder neuer, weitergeben und verändern.', 'CineMosaic est un logiciel libre : vous pouvez le redistribuer et le modifier selon les termes de la GNU General Public License, version 3 ou ultérieure.', 'CineMosaic es software libre: puedes redistribuirlo y modificarlo según los términos de la GNU General Public License, versión 3 o posterior.'),
+    'It comes with ABSOLUTELY NO WARRANTY – use at your own risk.': ('Sie wird OHNE JEDE GEWÄHRLEISTUNG bereitgestellt – Nutzung auf eigenes Risiko.', 'Il est fourni SANS AUCUNE GARANTIE – utilisation à vos propres risques.', 'Se ofrece SIN NINGUNA GARANTÍA; úsalo bajo tu propia responsabilidad.'),
+    'Source code': ('Quellcode', 'Code source', 'Código fuente'),
+    'License': ('Lizenz', 'Licence', 'Licencia'),
+    'THIRD-PARTY': ('DRITTANBIETER', 'TIERS', 'TERCEROS'),
+    'Avid and Media Composer are trademarks of Avid Technology, Inc. CineMosaic is not affiliated with Avid.': ('Avid und Media Composer sind Marken von Avid Technology, Inc. CineMosaic steht in keiner Verbindung zu Avid.', "Avid et Media Composer sont des marques d'Avid Technology, Inc. CineMosaic n'est pas affilié à Avid.", 'Avid y Media Composer son marcas de Avid Technology, Inc. CineMosaic no está afiliado a Avid.'),
+    'Settings…': ('Einstellungen…', 'Réglages…', 'Ajustes…'),
+    'Choose…': ('Wählen…', 'Choisir…', 'Elegir…'),
+    'Paused': ('Pausiert', 'En pause', 'En pausa'),
+    'Resume': ('Fortsetzen', 'Reprendre', 'Reanudar'),
+    'Pause': ('Pause', 'Pause', 'Pausa'),
+    'Cancel': ('Abbrechen', 'Annuler', 'Cancelar'),
+    'Show in Finder': ('Im Finder zeigen', 'Afficher dans le Finder', 'Mostrar en el Finder'),
+    'Tests ffmpeg, grabbing frames, reading cut lists, saving sheets and updates on test data of its own and sends us an anonymous report.': ('Testet ffmpeg, das Holen von Frames, das Lesen von Schnittlisten, das Speichern von Bögen und Updates mit eigenen Testdaten und schickt uns einen anonymen Bericht.', 'Teste ffmpeg, l’extraction d’images, la lecture des listes de montage, l’enregistrement des planches et les mises à jour sur ses propres données de test et nous envoie un rapport anonyme.', 'Prueba ffmpeg, la extracción de fotogramas, la lectura de listas de montaje, el guardado de hojas y las actualizaciones con datos de prueba propios y nos envía un informe anónimo.'),
+    'CineMosaic tests ffmpeg, grabbing frames, reading cut lists, saving sheets and updates on test data of its own and sends us an anonymous report. Your volumes are only listed, never changed. It takes less than a minute.': ('CineMosaic testet ffmpeg, das Holen von Frames, das Lesen von Schnittlisten, das Speichern von Bögen und Updates mit eigenen Testdaten und schickt uns einen anonymen Bericht. Deine Volumes werden nur aufgelistet, nie verändert. Das dauert weniger als eine Minute.', 'CineMosaic teste ffmpeg, l’extraction d’images, la lecture des listes de montage, l’enregistrement des planches et les mises à jour sur ses propres données de test et nous envoie un rapport anonyme. Vos volumes sont seulement listés, jamais modifiés. Cela prend moins d’une minute.', 'CineMosaic prueba ffmpeg, la extracción de fotogramas, la lectura de listas de montaje, el guardado de hojas y las actualizaciones con datos de prueba propios y nos envía un informe anónimo. Tus volúmenes solo se listan, nunca se modifican. Tarda menos de un minuto.'),
+    'JetBrains Mono font – SIL Open Font License 1.1. Slint UI toolkit – used under the GNU GPL v3. FFmpeg – GNU GPL. Bin and AAF format knowledge from pyavb and pyaaf2 by Mark Reid (MIT).': ('Schrift JetBrains Mono – SIL Open Font License 1.1. Slint UI Toolkit – unter der GNU GPL v3 verwendet. FFmpeg – GNU GPL. Wissen über das Bin- und AAF-Format aus pyavb und pyaaf2 von Mark Reid (MIT).', 'Police JetBrains Mono – SIL Open Font License 1.1. Boîte à outils Slint – utilisée sous la GNU GPL v3. FFmpeg – GNU GPL. Connaissance des formats de chutier et AAF issue de pyavb et pyaaf2 de Mark Reid (MIT).', 'Fuente JetBrains Mono – SIL Open Font License 1.1. Kit de interfaz Slint – usado bajo la GNU GPL v3. FFmpeg – GNU GPL. Conocimiento de los formatos de bin y AAF de pyavb y pyaaf2 de Mark Reid (MIT).'),
+    'Source': ('Quelle', 'Source', 'Origen'),
+    'Master file + cut list': ('Masterfile + Schnittliste', 'Fichier master + liste de montage', 'Máster + lista de montaje'),
+    'Media Composer bin': ('Media-Composer-Bin', 'Chutier Media Composer', 'Bin de Media Composer'),
+    'Master file': ('Masterfile', 'Fichier master', 'Archivo máster'),
+    'Cut list': ('Schnittliste', 'Liste de montage', 'Lista de montaje'),
+    'Bin': ('Bin', 'Chutier', 'Bin'),
+    'Sequence': ('Sequenz', 'Séquence', 'Secuencia'),
+    'Volumes with Avid MediaFiles': ('Volumes mit Avid MediaFiles', 'Volumes avec Avid MediaFiles', 'Volúmenes con Avid MediaFiles'),
+    'No volume with an Avid MediaFiles folder is connected.': ('Kein Volume mit einem Ordner „Avid MediaFiles“ ist angeschlossen.', 'Aucun volume avec un dossier « Avid MediaFiles » n’est connecté.', 'No hay ningún volumen con una carpeta «Avid MediaFiles» conectado.'),
+    'Grab stills again': ('Stills neu holen', 'Reprendre les images', 'Volver a extraer'),
+    'Grab stills': ('Stills holen', 'Extraire les images', 'Extraer fotogramas'),
+    'Picture format': ('Bildformat', 'Format d’image', 'Formato de imagen'),
+    'Full frame': ('Vollbild', 'Image entière', 'Fotograma completo'),
+    'Custom': ('Eigenes', 'Personnalisé', 'Personalizado'),
+    'Width : height': ('Breite : Höhe', 'Largeur : hauteur', 'Ancho : alto'),
+    'Black bars outside this format are cut off (top and bottom or left and right).': ('Schwarze Balken außerhalb dieses Formats werden abgeschnitten (oben und unten oder links und rechts).', 'Les bandes noires hors de ce format sont coupées (en haut et en bas ou à gauche et à droite).', 'Las barras negras fuera de este formato se recortan (arriba y abajo o a izquierda y derecha).'),
+    'Paper': ('Papier', 'Papier', 'Papel'),
+    'Width × height': ('Breite × Höhe', 'Largeur × hauteur', 'Ancho × alto'),
+    'Width': ('Breite', 'Largeur', 'Ancho'),
+    'Height': ('Höhe', 'Hauteur', 'Alto'),
+    'Orientation': ('Ausrichtung', 'Orientation', 'Orientación'),
+    'Portrait': ('Hochformat', 'Portrait', 'Vertical'),
+    'Landscape': ('Querformat', 'Paysage', 'Horizontal'),
+    'Resolution': ('Auflösung', 'Résolution', 'Resolución'),
+    'Margin': ('Rand', 'Marge', 'Margen'),
+    'Gap between stills': ('Abstand zwischen Stills', 'Espace entre les images', 'Espacio entre fotogramas'),
+    'Columns automatic': ('Spalten automatisch', 'Colonnes automatiques', 'Columnas automáticas'),
+    'Columns': ('Spalten', 'Colonnes', 'Columnas'),
+    'EXPORT': ('EXPORT', 'EXPORT', 'EXPORTAR'),
+    'Format': ('Format', 'Format', 'Formato'),
+    'Saving…': ('Speichere…', 'Enregistrement…', 'Guardando…'),
+    'Save…': ('Speichern…', 'Enregistrer…', 'Guardar…'),
+    'Preview of the sheet': ('Vorschau des Bogens', 'Aperçu de la planche', 'Vista previa de la hoja'),
+    'Choose a master file and its cut list.': ('Wähle ein Masterfile und seine Schnittliste.', 'Choisissez un fichier master et sa liste de montage.', 'Elige un máster y su lista de montaje.'),
+    'Choose a bin with your sequence.': ('Wähle einen Bin mit deiner Sequenz.', 'Choisissez un chutier avec votre séquence.', 'Elige un bin con tu secuencia.'),
+    'Zoom out': ('Verkleinern', 'Zoom arrière', 'Alejar'),
+    'Zoom in': ('Vergrößern', 'Zoom avant', 'Acercar'),
+    'Fit': ('Einpassen', 'Ajuster', 'Ajustar'),
+    'Fit the whole sheet': ('Ganzen Bogen einpassen', 'Ajuster toute la planche', 'Ajustar toda la hoja'),
+    'Sheet': ('Bogen', 'Planche', 'Hoja'),
+    'Design': ('Gestaltung', 'Mise en page', 'Diseño'),
+    'Crop marks': ('Schnittmarken', 'Traits de coupe', 'Marcas de corte'),
+    'The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out.': ('Der Bogen wird in einer Fläche im Bildformat innerhalb des Papiers angelegt, mit Schnittmarken an den Ecken zum Ausschneiden.', 'La planche est mise en page dans une zone au format de l’image à l’intérieur du papier, avec des traits de coupe aux coins pour la découper.', 'La hoja se compone en una zona con el formato de imagen dentro del papel, con marcas de corte en las esquinas para recortarla.'),
+    'LINE': ('LINIE', 'CADRE', 'LÍNEA'),
+    'Frame line': ('Rahmenlinie', 'Cadre', 'Línea de marco'),
+    'Thickness': ('Dicke', 'Épaisseur', 'Grosor'),
+    'Distance from the edge': ('Abstand zum Rand', 'Distance au bord', 'Distancia al borde'),
+    'Colour': ('Farbe', 'Couleur', 'Color'),
+    'Black': ('Schwarz', 'Noir', 'Negro'),
+    'Dark grey': ('Dunkelgrau', 'Gris foncé', 'Gris oscuro'),
+    'Grey': ('Grau', 'Gris', 'Gris'),
+    'White': ('Weiß', 'Blanc', 'Blanco'),
+    'Red': ('Rot', 'Rouge', 'Rojo'),
+    'HEADLINE': ('HEADLINE', 'TITRE', 'TÍTULO'),
+    'Headline': ('Headline', 'Titre', 'Título'),
+    'Headline (empty = none)': ('Headline (leer = keine)', 'Titre (vide = aucun)', 'Título (vacío = ninguno)'),
+    'Font': ('Schrift', 'Police', 'Fuente'),
+    'Size': ('Größe', 'Taille', 'Tamaño'),
+    'Bold': ('Fett', 'Gras', 'Negrita'),
+    'Italic': ('Kursiv', 'Italique', 'Cursiva'),
+    'Position': ('Position', 'Position', 'Posición'),
+    'Top left': ('Oben links', 'En haut à gauche', 'Arriba a la izquierda'),
+    'Top centre': ('Oben Mitte', 'En haut au centre', 'Arriba en el centro'),
+    'Top right': ('Oben rechts', 'En haut à droite', 'Arriba a la derecha'),
+    'Bottom left': ('Unten links', 'En bas à gauche', 'Abajo a la izquierda'),
+    'Bottom centre': ('Unten Mitte', 'En bas au centre', 'Abajo en el centro'),
+    'Bottom right': ('Unten rechts', 'En bas à droite', 'Abajo a la derecha'),
+    'The headline sits on the frame line; the line breaks around it.': ('Die Headline sitzt auf der Rahmenlinie; die Linie ist um sie herum unterbrochen.', 'Le titre se place sur le cadre ; le trait s’interrompt autour de lui.', 'El título se sitúa sobre la línea de marco; la línea se interrumpe a su alrededor.'),
+    "Without a frame line the headline sits at the line's distance from the edge.": ('Ohne Rahmenlinie steht die Headline im Abstand der Linie zum Rand.', 'Sans cadre, le titre se place à la distance du cadre au bord.', 'Sin línea de marco, el título se sitúa a la distancia de la línea al borde.'),
+}
+
+def q(s):
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n') + '"'
+
+used = set()
+for m in re.finditer(r'@tr\("((?:[^"\\]|\\.)*)"(?:\s*\|\s*"((?:[^"\\]|\\.)*)")?', (ROOT / "ui/app.slint").read_text()):
+    used.add((m[1], m[2]) if m[2] else m[1])
+missing = [u for u in used if u not in T]
+
+unused = [k for k in T if k not in used]
+if missing or unused:
+    print("missing:", missing, "\nunused:", unused)
+    sys.exit(1)
+for i, lang in enumerate(LANGS):
+    out = [f"# {lang} translation of CineMosaic – generated by scripts/translations.py, edit the table there",
+           'msgid ""', 'msgstr ""', q("Project-Id-Version: CineMosaic\n"), q(f"Language: {lang}\n"),
+           q("MIME-Version: 1.0\n"), q("Content-Type: text/plain; charset=UTF-8\n"), q("Content-Transfer-Encoding: 8bit\n"),
+           q(f"Plural-Forms: {PLURAL[lang]}\n"), ""]
+    for en, tr in T.items():
+        if isinstance(en, tuple):
+            out += [f"msgid {q(en[0])}", f"msgid_plural {q(en[1])}", f"msgstr[0] {q(tr[i][0])}", f"msgstr[1] {q(tr[i][1])}", ""]
+        else:
+            out += [f"msgid {q(en)}", f"msgstr {q(tr[i])}", ""]
+    d = ROOT / "translations" / lang / "LC_MESSAGES"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "cinemosaic.po").write_text("\n".join(out))
+print("ok:", len(T), "strings ×", len(LANGS))

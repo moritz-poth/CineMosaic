@@ -1,0 +1,57 @@
+# CineMosaic
+
+One still from the middle of every shot of a cut, laid out on one sheet (contact sheet). Shared rules: `~/.claude/skills/moe-apps/SKILL.md`.
+
+## Decisions (user, 2026-11-20)
+- Two sources: (a) Media Composer bin + Avid MediaFiles volumes, (b) master file + cut list.
+- Cut lists: EDL (CMX3600), FCP7 XML, FCPXML, AAF (AAF still to do).
+- Shot = what is visible: at every moment the topmost video track with a clip wins (`Timeline::shots`); a clip partly covered from above gives two shots. Generators/titles count as see-through.
+- Still = middle frame of the shot: `start + len / 2` in record frames. Master mode: frame in master = record frame − master start TC (from ffprobe).
+- Sheet: Custom or DIN A0–A6 + dpi, margin, gap; grid automatic (largest stills) with optional fixed column count; block centred. Frame line, headline, crop marks: see Sheet design.
+- Output: PNG, TIFF, JPEG (dpi stored in the file), PDF (page = paper size).
+- Stack: Rust (Slint UI to come, like MediaFiles Check); bin reading will reuse `src/avb.rs` from MediaFiles Check. Frames via ffmpeg/ffprobe (bundled next to the binary, else Homebrew).
+
+## Layout
+- `src/timeline.rs` model + timecode (`Item.key` / `Shot.key` + `item_start` let bin mode find the component again), `edl.rs`, `fcp7.rs`, `fcpxml.rs` readers, `frames.rs` ffprobe/ffmpeg, `layout.rs` grid + render, `export.rs` files, `lib.rs` `read_cut_list`, `grab_stills` (4 parallel, `Gate` pause/cancel), `main.rs` test CLI.
+- `src/app.rs` + `ui/app.slint`: window 1180 × 780 (side column 380 px, preview right). State in a thread_local `STATE`; stills in `~/Library/Caches/CineMosaic/stills`, 480 px copies in memory for the preview (drawn at 1800 px long side on the UI thread). Number fields accept a decimal comma; an unreadable field turns red and the preview keeps its last good state.
+- Screenshots: `screencapture -l` gave white images; a temp hook that calls `app.window().take_snapshot()` and quits works (removed again, re-add when needed).
+- `tests/master.rs` proves the exact frame on a generated master (pixel colour = frame number).
+
+## Picture format (user 2026-11-20)
+Picture format dropdown (Full frame, 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39, Custom "2.39" / "21:9"): `layout::crop` cuts the still around its centre (letterbox or pillarbox) when the sheet is drawn; stills on disk stay full frame, so changing the format needs no new grab. The grid uses the chosen format.
+
+## Bin mode (2026-11-20)
+- `src/avb.rs`: every object that starts like a component is read generically (0x02 0x01 = clip with length, 0x02 0x08 = track group with length + tracks), so unknown classes keep positions right. Parsed specially: SEQU, SCLP, TCCP (start TC), CMPO (mobs), TNFX (cut point), SLCT (selected angle = index into tracks), SPED (speed num/den). `Bin::pieces` = sequence pieces with transitions cut at their cut point (the next component runs under the transition: `raw` start). `Bin::resolve` follows a frame down: sequence → piece, effect → first input that shows media, selector → selected track, motion effect → offset × num/den, source clip → mob (this bin, else the project's other bins) → same track number + media kind, until a file mob (`Hit::Media`). Filler / empty effects = `Hit::Empty` = see-through (left out of the timeline).
+- `src/bin.rs` `BinCut`: picture tracks of the sequence → `Timeline` (positions incl. the sequence's start TC); the project's other bins are read only if a clip is missing (project = nearest folder above with an .avp, Attic skipped). `jobs()` resolves each shot's middle, then `media::locate` finds the files.
+- `src/media.rs`: msmFMID.pmr reader + MXF header reader copied from MediaFiles Check; `locate` uses the pmr names first, headers only for unlisted files while something is still missing. `volumes()` = /Volumes/* with "Avid MediaFiles/MXF" (UI polls every 2 s, switches per volume).
+- Checked on the MediaFiles Check test lab (`~/MFC-Testlab/golden`, read only): 5 sequences, DNxHD OP-Atom frames grabbed (60 stills in 3 s); AMA sequence → "media file not on the chosen volumes" (linked files are not in Avid MediaFiles). Transitions, motion effects, multicam: unit tests only (the lab has none).
+- AMA / linked media (user 2026-11-20): FILE/WINF locators are read (path, POSIX ext 0x01, UTF-8 ext 0x02); the path sits on the source mob BELOW the AMA file mob (file mob: CDCI + MSML locator, no path). `Bin::linked` returns that path with the FILE MOB's frame – the clip below carried start 1 for a 25-frame .mov (would push past the end). `bin::linked_file` accepts POSIX, file:// URLs and old "Volume:dir:file" paths. Checked: AMA sequence of the test lab, 10 stills from the .mov files (frame offset not proven, all lab clips look alike).
+- Not handled yet: titles/keys on upper tracks count as visible (they resolve to media), sequence edit rate ≠ media rate is scaled but untested.
+
+## Next
+1. (done 2026-11-20) Slint UI. Rust-side texts are still English literals, not yet translatable.
+2. (done 2026-11-20) Bin mode – test with a real cut (transitions, effects, multicam).
+3. (done 2026-11-20) AAF reader `src/aaf.rs` (crate cfb): root → Header → Content → Mobs set → top-level CompositionMob (usage TopLevel, else first) → TimelineMobSlots; picture slots by data definition (weak ref key), timecode slot gives the start TC; Sequence components with transitions cut at CutPoint, Filler see-through, names via SourceID → mob name (through OperationGroup inputs, Selector, EssenceGroup, NestedScope). Unit test writes a synthetic AAF with the cfb crate – NOT yet checked against a real Media Composer / Premiere / Resolve AAF (none on this Mac).
+4. (done 2026-11-20) moe-apps standard parts, see below.
+
+## Window and preview (user 2026-11-20)
+- Main window resizable: min 1000 × 920 (height lowered to the screen on small displays), set as Slint min size AND as NSWindow contentMinSize (`mac_window::set_min_size`, chrome timer) – checked: AppKit holds 1000 × 920.
+- Margin and Gap: number field + std Slider below it (0–40 / 0–20 mm, 0.5 steps); typing moves the slider (`edited` sets its value).
+- Preview zoom 100–800 %: trackpad pinch (`ScaleRotateGestureHandler`), ⌘ + scroll, buttons − / + / Fit bottom right, double-click fit ↔ 200 %; drag or two-finger scroll moves the page when zoomed (pan clamped so 40 px stay in view). The preview is drawn by one renderer thread (`start_renderer`, newest job wins, `RENDER_GEN`); zoomed it is drawn sharper (long side 1800 px × zoom, at most the sheet's own size and 8000 px), 180 ms after the zoom rests. Preview stills are 480 px copies – at high zoom on large sheets they look soft (the saved sheet uses the full stills).
+
+## Sheet design (user 2026-11-20, second round)
+- Stills COVER their cell (scaled to fill, overhang cut around the centre) – the old fit-with-aspect left 1 px white lines at gap 0 and shifted cells; test `no_white_between_stills_at_gap_zero` uses odd sizes.
+- `layout::Sheet` has `trim` (trim area of an aspect inside the paper, 12 mm room for crop marks: 3 mm off the corner, 6 mm long, 0.1 mm), `line` (width, inset from the trim edge, colour) and `headline` (text, `fonts::Face`, pt size, colour, top/bottom × left/centre/right). `Sheet::plan` places everything: headline centred on the line (without a line at the line's inset), left/right headline 8 mm in from the corner, the line breaks 2 mm around the text, the grid area keeps 2 mm clear of line and headline whatever the margin.
+- Text: `src/fonts.rs` (fontdb: installed families for the menu, best face for bold/italic; missing bold = strokes widened, missing italic = slanted 0.2), drawn with ab_glyph in pt (em) sizes at the sheet's dpi.
+- Side column split into tabs Source / Sheet / Design (`TabStrip`, `side-tab`); Export stays at the bottom; min height now 820. Colours: `ColorRow` (5 swatches + hex field, Rust shows what it read in the swatch square). Default orientation landscape.
+- Bin mode: Sequence menu starts with "All sequences" (default) = every sequence of the bin in natural name order (`bin::natural`), shots one after the other; `BinCut.timelines`, `BinCut::shots()`. Bin-mode UI tests must not run with the 2 s volume poll – it swaps the test volumes for the user's real ones (happened twice); test bin mode with the CLI.
+
+## Standard parts (2026-11-20, copied from MediaFiles Check)
+- Languages: UI `@tr()` + `scripts/translations.py` (table; run after every UI text change, fails on a missing entry; 69 entries taken over from Check) → `translations/<lang>/LC_MESSAGES/cinemosaic.po`, bundled by build.rs. Texts Rust writes: `tr([en, de, fr, es])` in app.rs with the global `LANG` (AtomicUsize, worker threads read it too); core messages users see per shot take a `lang` (`master_jobs`, `BinCut::jobs`). Parser errors of broken files stay English.
+- Settings window (General / Updates / Support / About), app menu About + Settings… (`mac_menu`), Help → Manual + Show Log File, manual `docs/help/<lang>.md`, log `~/Library/Logs/CineMosaic/CineMosaic.log`, settings `~/Library/Application Support/CineMosaic/settings.txt` (language, dark/light, tab, betas).
+- Name: CineMosaic (user 2026-11-20; working title was StillSheet – repo folder renamed, old log/cache moved to the Trash). Repo to be: github.com/moritz-poth/cinemosaic, bundle id io.github.moritz-poth.cinemosaic.
+- Updater `src/update.rs` (identical to Check's). Update key "CineMosaic update key" in the login Keychain since 2026-11-20 (public half in `UPDATE_APP`); never replace it – back up the Keychain item.
+- Support: `src/selftest.rs` (ffmpeg, exact middle frame on a generated video, cut lists, sheets in all formats, volumes readable, log, update download), `src/report.rs` (product "cinemosaic"). The Mountpoint worker does not know "cinemosaic" yet (needs a REPOS entry + private repo moritz-poth/cinemosaic-reports – outward-facing, ask first): until then reports are saved to Downloads.
+- Icon: `scripts/make-icon.swift` (contact sheet on the Mountpoint plate) → assets/AppIcon.iconset + icon.png. Working icon, not chosen by the user.
+- Build: `scripts/build-mac-app.sh` (universal, ad-hoc signed, zip + signature if the key matches). FFmpeg is bundled from `vendor/ffmpeg/{arm64,x86_64}/{ffmpeg,ffprobe}` (static builds, git-ignored; source, versions and SHA-256 in `vendor/ffmpeg/SOURCE.txt`: arm64 9.0.2 osxexperts.net, x86_64 9.1 evermeet.cx, both GPL v3, no nonfree); without them the script says "NO FFMPEG BUNDLED". Checked: both architectures grab with the bundled ffmpeg and PATH without Homebrew (Intel via Rosetta); results differ only by rounding (PSNR 54 dB).
+- Not done yet: DMG window (needs the app's own left colour), README screenshots, manual pictures.

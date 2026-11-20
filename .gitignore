@@ -1,0 +1,6 @@
+target/
+/test-data/
+/dist/
+/vendor/
+.DS_Store
+.omc/
