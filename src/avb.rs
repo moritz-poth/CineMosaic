@@ -408,6 +408,10 @@ fn parse_object(class: &[u8; 4], d: &[u8], le: bool) -> Res<Raw> {
     }
 }
 
+/// Limits for walking a bin (real sequences stay far below them).
+const MAX_DEPTH: u32 = 64;
+const MAX_STEPS: u32 = 10_000;
+
 /// What a frame of a component shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Hit {
@@ -579,10 +583,19 @@ impl Bin {
 
     /// Length of a component; a sequence's transitions overlap their neighbours.
     pub fn length(&self, obj: u32) -> i64 {
+        self.length_in(obj, 0)
+    }
+
+    /// `depth` stops a broken or crafted bin whose sequences contain themselves.
+    fn length_in(&self, obj: u32, depth: u32) -> i64 {
+        if depth > MAX_DEPTH {
+            return 0;
+        }
         match self.comps.get(&obj) {
-            Some(Component { part: Part::Sequence(parts), .. }) => {
-                parts.iter().map(|&p| if self.is_transition(p) { -self.length(p) } else { self.length(p) }).sum()
-            }
+            Some(Component { part: Part::Sequence(parts), .. }) => parts
+                .iter()
+                .map(|&p| if self.is_transition(p) { -self.length_in(p, depth + 1) } else { self.length_in(p, depth + 1) })
+                .fold(0i64, |a, b| a.saturating_add(b)),
             Some(c) => c.length,
             None => 0,
         }
@@ -629,18 +642,21 @@ impl Bin {
 
     /// What frame `off` of component `obj` shows; `bins` = other bins of the project for mobs not in this one.
     pub fn resolve(&self, obj: u32, off: i64, bins: &[Bin]) -> Hit {
-        self.resolve_in(obj, off, bins, "", 0)
+        self.resolve_in(obj, off, bins, "", 0, &std::cell::Cell::new(0))
     }
 
-    fn resolve_in(&self, obj: u32, off: i64, bins: &[Bin], clip: &str, depth: u32) -> Hit {
-        if depth > 64 {
+    /// `depth` stops cycles, `steps` caps the whole walk: effects try every input, and a crafted bin with nested
+    /// many-input effects would otherwise take exponential time.
+    fn resolve_in(&self, obj: u32, off: i64, bins: &[Bin], clip: &str, depth: u32, steps: &std::cell::Cell<u32>) -> Hit {
+        steps.set(steps.get() + 1);
+        if depth > MAX_DEPTH || steps.get() > MAX_STEPS {
             return Hit::Missing { clip: clip.to_string() };
         }
         let Some(c) = self.comps.get(&obj) else { return Hit::Empty };
         match &c.part {
             Part::Clip | Part::Timecode(_) => Hit::Empty,
             Part::Sequence(_) => match self.pieces(obj).into_iter().find(|p| p.0 <= off && off < p.1) {
-                Some((_, _, p, raw)) => self.resolve_in(p, off - raw, bins, clip, depth + 1),
+                Some((_, _, p, raw)) => self.resolve_in(p, off - raw, bins, clip, depth + 1, steps),
                 None => Hit::Empty,
             },
             Part::Group { class, tracks, selected, speed, .. } => {
@@ -651,12 +667,12 @@ impl Bin {
                 if class == b"SLCT"
                     && let Some(Some(t)) = selected.and_then(|s| tracks.get(s as usize))
                 {
-                    return self.resolve_in(*t, inner, bins, clip, depth + 1);
+                    return self.resolve_in(*t, inner, bins, clip, depth + 1, steps);
                 }
                 // effects: the first input that shows something
                 let mut fallback = Hit::Empty;
                 for t in tracks.iter().flatten() {
-                    match self.resolve_in(*t, inner, bins, clip, depth + 1) {
+                    match self.resolve_in(*t, inner, bins, clip, depth + 1, steps) {
                         h @ Hit::Media { .. } => return h,
                         Hit::Empty => {}
                         h => fallback = h,
@@ -684,7 +700,7 @@ impl Bin {
                 let Some(&(_, t)) = same(true).or_else(|| same(false)) else { return Hit::Offline { clip: clip.to_string() } };
                 let rate = bin.comps.get(&t).map_or(c.rate, |tc| tc.rate);
                 let at = if rate > 0.0 && c.rate > 0.0 && (rate - c.rate).abs() > 0.001 { (at as f64 * rate / c.rate).round() as i64 } else { at };
-                bin.resolve_in(t, at, bins, clip, depth + 1)
+                bin.resolve_in(t, at, bins, clip, depth + 1, steps)
             }
         }
     }
@@ -767,6 +783,25 @@ mod tests {
         assert_eq!(frame(b.resolve(20, 240, &[])), 1000 + 2000 + 20);
         // multicam from 270: the selected angle (track 2)
         assert_eq!(frame(b.resolve(20, 275, &[])), 1000 + 3000 + 5);
+    }
+
+    #[test]
+    fn crafted_cycles_and_effect_towers_end_quickly() {
+        let mut b = Bin::default();
+        // a sequence that contains itself
+        b.comps.insert(1, comp(Part::Sequence(vec![1, 2]), 0));
+        b.comps.insert(2, comp(Part::Clip, 10));
+        assert!(b.length(1) >= 0);
+        assert!(!matches!(b.resolve(1, 3, &[]), Hit::Media { .. }));
+        // 40 levels of effects with 4 inputs each, all pointing at the next level: 4^40 paths without a budget
+        for i in 100..140u32 {
+            b.comps.insert(i, comp(Part::Group { class: *b"TKFX", tracks: vec![Some(i + 1); 4], selected: None, speed: None, cutpoint: 0 }, 10));
+        }
+        b.comps.insert(140, comp(Part::Clip, 10));
+        let t = std::time::Instant::now();
+        // no media anywhere: the walk gives up (Empty or Missing) instead of running for ever
+        assert!(!matches!(b.resolve(100, 1, &[]), Hit::Media { .. }));
+        assert!(t.elapsed().as_secs() < 2);
     }
 
     #[test]

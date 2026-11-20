@@ -15,8 +15,13 @@ fn time(v: Option<&str>) -> Option<(i64, i64)> {
 
 fn frames(t: (i64, i64), rate: Rate) -> i64 {
     let (n, d) = (t.0 as i128 * rate.num as i128, t.1 as i128 * rate.den as i128);
+    if d == 0 {
+        return 0;
+    }
     ((2 * n + d) / (2 * d)) as i64 // rounded
 }
+
+const MAX_LANE: i64 = 99;
 
 const PICTURE: [&str; 6] = ["asset-clip", "clip", "ref-clip", "mc-clip", "sync-clip", "video"];
 
@@ -25,7 +30,11 @@ pub fn parse(xml: &str) -> Result<Timeline, String> {
     let seq = doc.descendants().find(|n| n.has_tag_name("sequence")).ok_or("no sequence in the FCPXML")?;
     let format = seq.attribute("format").and_then(|id| doc.descendants().find(|n| n.has_tag_name("format") && n.attribute("id") == Some(id)));
     let fd = time(format.and_then(|f| f.attribute("frameDuration"))).ok_or("the sequence has no frame rate")?;
-    let rate = Rate { num: fd.1 as u32, den: fd.0 as u32 };
+    let (Ok(num), Ok(den)) = (u32::try_from(fd.1), u32::try_from(fd.0)) else { return Err("unreadable frame rate".into()) };
+    if num == 0 || den == 0 {
+        return Err("unreadable frame rate".into());
+    }
+    let rate = Rate { num, den };
     let spine = seq.children().find(|c| c.has_tag_name("spine")).ok_or("the sequence has no storyline")?;
     let mut tracks: Vec<Track> = vec![Track::default()];
     for e in spine.children().filter(|c| c.is_element()) {
@@ -38,7 +47,8 @@ pub fn parse(xml: &str) -> Result<Timeline, String> {
         // connected clips: their offset is in the parent's source time
         for c in e.children().filter(|c| PICTURE.contains(&c.tag_name().name())) {
             let lane: usize = match c.attribute("lane").and_then(|l| l.parse::<i64>().ok()) {
-                Some(l) if l > 0 => l as usize,
+                // more lanes than any real cut has: a broken or crafted file, skip
+                Some(l) if (1..=MAX_LANE).contains(&l) => l as usize,
                 _ => continue,
             };
             let (Some(coff), Some(cdur)) = (time(c.attribute("offset")), time(c.attribute("duration"))) else { continue };
@@ -59,6 +69,18 @@ fn item(e: Node, pos: i64, dur: i64) -> Item {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crafted_lanes_and_rates_are_refused() {
+        let zero = r#"<fcpxml><resources><format id="r1" frameDuration="0/25s"/></resources><sequence format="r1"><spine/></sequence></fcpxml>"#;
+        assert!(parse(zero).is_err());
+        let lane = r#"<fcpxml><resources><format id="r1" frameDuration="1/25s"/></resources><sequence format="r1"><spine>
+<asset-clip name="A" offset="0s" duration="1s"><asset-clip name="X" lane="2000000000" offset="0s" duration="1s"/></asset-clip></spine></sequence></fcpxml>"#;
+        let t = parse(lane).unwrap();
+        assert_eq!(t.tracks.len(), 1);
+        let zero_dur = r#"<fcpxml><resources><format id="r1" frameDuration="1/25s"/></resources><sequence format="r1"><spine><asset-clip name="A" offset="1/0s" duration="1s"/></spine></sequence></fcpxml>"#;
+        assert!(parse(zero_dur).is_ok());
+    }
 
     #[test]
     fn reads_spine_and_connected_clips() {
