@@ -314,14 +314,32 @@ msgstr "PREAJUSTE"
 msgid "Preset"
 msgstr "Preajuste"
 
-msgid "Save as preset…"
-msgstr "Guardar como preajuste…"
+msgid "New preset…"
+msgstr "Nuevo preajuste…"
 
-msgid "Load from file…"
-msgstr "Cargar desde archivo…"
+msgid "Update with current settings"
+msgstr "Sustituir por los ajustes actuales"
 
-msgid "Show presets folder"
-msgstr "Mostrar carpeta de preajustes"
+msgid "Rename…"
+msgstr "Renombrar…"
+
+msgid "Delete…"
+msgstr "Eliminar…"
+
+msgid "Delete"
+msgstr "Eliminar"
+
+msgid "None yet"
+msgstr "Ninguno todavía"
+
+msgid "Name of the preset"
+msgstr "Nombre del preajuste"
+
+msgid "Delete “{}”?"
+msgstr "¿Eliminar «{}»?"
+
+msgid "Save"
+msgstr "Guardar"
 
 msgid "EXPORT"
 msgstr "EXPORTAR"

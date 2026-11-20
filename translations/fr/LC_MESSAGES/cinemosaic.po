@@ -314,14 +314,32 @@ msgstr "PRÉRÉGLAGE"
 msgid "Preset"
 msgstr "Préréglage"
 
-msgid "Save as preset…"
-msgstr "Enregistrer comme préréglage…"
+msgid "New preset…"
+msgstr "Nouveau préréglage…"
 
-msgid "Load from file…"
-msgstr "Charger depuis un fichier…"
+msgid "Update with current settings"
+msgstr "Remplacer par les réglages actuels"
 
-msgid "Show presets folder"
-msgstr "Afficher le dossier des préréglages"
+msgid "Rename…"
+msgstr "Renommer…"
+
+msgid "Delete…"
+msgstr "Supprimer…"
+
+msgid "Delete"
+msgstr "Supprimer"
+
+msgid "None yet"
+msgstr "Aucun pour l’instant"
+
+msgid "Name of the preset"
+msgstr "Nom du préréglage"
+
+msgid "Delete “{}”?"
+msgstr "Supprimer « {} » ?"
+
+msgid "Save"
+msgstr "Enregistrer"
 
 msgid "EXPORT"
 msgstr "EXPORT"

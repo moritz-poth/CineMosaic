@@ -50,9 +50,17 @@ Bogen › Schnittmarken legt den Bogen in einer Fläche im Bildformat innerhalb 
 
 ## Presets
 
-Ein Preset merkt sich das Aussehen des Bogens: Papier, Ausrichtung, Auflösung, Rand, Abstand, Spalten, Bildformat, Schnittmarken, Rahmenlinie, Schrift, Größe, Stil, Farbe und Platz der Headline sowie das Exportformat. Die Quelle und den Headline-Text merkt es sich nicht – sie gehören zum Projekt.
+Ein Preset merkt sich das Aussehen des Bogens: Papier, Ausrichtung, Auflösung, Rand, Abstand, Spalten, Bildformat, Schnittmarken, Rahmenlinie, Schrift, Größe, Stil, Farbe und Platz der Headline sowie das Exportformat. Die Quelle und den Headline-Text merkt es sich nicht – sie gehören zum Projekt. Presets bleiben in CineMosaic.
 
-Unter **Preset** wählst du **Als Preset sichern…** und gibst ihm einen Namen. Gesicherte Presets stehen im selben Menü; ein Klick setzt alle Felder auf einmal. **Aus Datei laden…** öffnet ein Preset von überall, zum Beispiel eins, das dir jemand geschickt hat. **Preset-Ordner zeigen** öffnet den Ordner im Finder; dort löschst du ein Preset. Die Schrift wird über ihren Namen gemerkt: Fehlt sie auf einem Mac, bleibt die Schrift, wie sie ist.
+Öffne das Menü **Preset** unten in der Seitenspalte:
+
+- **Neues Preset…** – Namen eintippen und **Sichern** klicken (Return geht auch, Esc bricht ab).
+- Ein Preset aus der Liste wählen setzt alle Felder auf einmal.
+- **Mit aktuellen Einstellungen überschreiben** – das gewählte Preset übernimmt die Felder, wie sie jetzt sind.
+- **Umbenennen…** – gibt dem gewählten Preset einen neuen Namen.
+- **Löschen…** – fragt einmal nach und entfernt dann das gewählte Preset.
+
+Die Schrift wird über ihren Namen gemerkt: Fehlt sie auf diesem Mac, bleibt die Schrift, wie sie ist.
 
 ## Speichern
 

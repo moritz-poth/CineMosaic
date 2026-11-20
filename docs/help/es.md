@@ -50,9 +50,17 @@ Hoja › Marcas de corte compone la hoja en una zona con el formato de imagen de
 
 ## Preajustes
 
-Un preajuste guarda el aspecto de la hoja: papel, orientación, resolución, margen, separación, columnas, formato de imagen, marcas de corte, línea de marco, fuente, tamaño, estilo, color y posición del título, y el formato de exportación. No guarda la fuente de material ni el texto del título: pertenecen al proyecto.
+Un preajuste guarda el aspecto de la hoja: papel, orientación, resolución, margen, separación, columnas, formato de imagen, marcas de corte, línea de marco, fuente, tamaño, estilo, color y posición del título, y el formato de exportación. No guarda la fuente de material ni el texto del título: pertenecen al proyecto. Los preajustes se quedan dentro de CineMosaic.
 
-En **Preajuste**, elige **Guardar como preajuste…** y dale un nombre. Los preajustes guardados aparecen en el mismo menú; elegir uno ajusta todos los campos a la vez. **Cargar desde archivo…** abre un preajuste desde cualquier lugar, por ejemplo uno que te haya enviado un colega. **Mostrar carpeta de preajustes** abre la carpeta en el Finder; allí se borra un preajuste. La fuente se guarda por su nombre: si un Mac no la tiene, la fuente se queda como está.
+Abre el menú **Preajuste** abajo en la columna lateral:
+
+- **Nuevo preajuste…**: escribe un nombre y haz clic en **Guardar** (Retorno también sirve, Esc cancela).
+- Elegir un preajuste de la lista ajusta todos los campos a la vez.
+- **Sustituir por los ajustes actuales**: el preajuste elegido toma los campos tal como están.
+- **Renombrar…**: da un nombre nuevo al preajuste elegido.
+- **Eliminar…**: pregunta una vez y luego elimina el preajuste elegido.
+
+La fuente se guarda por su nombre: si este Mac no la tiene, la fuente se queda como está.
 
 ## Guardar
 

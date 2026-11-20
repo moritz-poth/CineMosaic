@@ -48,11 +48,11 @@ Picture format dropdown (Full frame, 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39, Cu
 - Side column split into tabs Source / Sheet / Line / Headline (was Design) (`TabStrip`, `side-tab`); Export stays at the bottom; min height now 820. Colours: `ColorRow` (5 swatches + hex field, Rust shows what it read in the swatch square). Default orientation landscape.
 - Bin mode: Sequence menu starts with "All sequences" (default) = every sequence of the bin in natural name order (`bin::natural`), shots one after the other; `BinCut.timelines`, `BinCut::shots()`. Bin-mode UI tests must not run with the 2 s volume poll – it swaps the test volumes for the user's real ones (happened twice); test bin mode with the CLI.
 
-## Presets (user 2026-11-20)
-- Section PRESET above EXPORT, on every tab. Menu: saved presets, Save as preset…, Load from file…, Show presets folder.
-- Files: `~/Library/Application Support/CineMosaic/Presets/<name>.json` (`{"cinemosaic-preset": 1, …}`), written atomically; any .json with that key loads.
+## Presets (user 2026-11-20; files replaced by in-app presets the same evening)
+- Inside the app, no files for the user: `~/Library/Application Support/CineMosaic/presets.json` = `[{"name", "values"}]`, sorted by name, written atomically after every change (`PRESETS` thread_local, `store_presets`).
+- Section PRESET above EXPORT, on every tab. `PresetMenu`: presets (current disabled), New preset…, and for the chosen one Update with current settings / Rename… / Delete…. Naming happens inline (`preset-edit` 1 new / 2 rename: name field + Cancel/Save, Return/Esc); delete asks inline (`preset-edit` 3). Duplicate names (case-insensitive) are refused.
 - Kept: paper, orientation, dpi, margin, gap, columns, picture format, crop marks, line, headline font (by family name)/size/style/colour/anchor/offset, export format. Not kept: source, headline text (project-specific).
-- Loading ignores missing or out-of-range keys (older/newer presets). Round trip checked with a temporary hook 2026-11-20.
+- Loading ignores missing or out-of-range keys. New/choose/update/rename/delete/reload checked with a temporary hook and a scratch HOME 2026-11-20 (found and fixed a double RefCell borrow in delete).
 
 ## Standard parts (2026-11-20, copied from MediaFiles Check)
 - Languages: UI `@tr()` + `scripts/translations.py` (table; run after every UI text change, fails on a missing entry; 69 entries taken over from Check) → `translations/<lang>/LC_MESSAGES/cinemosaic.po`, bundled by build.rs. Texts Rust writes: `tr([en, de, fr, es])` in app.rs with the global `LANG` (AtomicUsize, worker threads read it too); core messages users see per shot take a `lang` (`master_jobs`, `BinCut::jobs`). Parser errors of broken files stay English.

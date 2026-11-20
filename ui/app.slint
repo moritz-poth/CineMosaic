@@ -202,14 +202,16 @@ component Dropdown {
     }
 }
 
-// Presets: Dropdown look, but the menu lists the saved presets plus save / load / folder
+// Presets: Dropdown look; the menu lists the presets (the current one ticked off) plus new / update / rename / delete
 component PresetMenu {
     in property <[string]> items;
+    in property <int> current;
     in property <string> title;
     callback chosen(int);
-    callback save();
-    callback load-file();
-    callback show-folder();
+    callback new();
+    callback update();
+    callback rename();
+    callback delete();
     height: 26px;
     min-width: row.preferred-width;
     max-width: row.preferred-width;
@@ -236,11 +238,12 @@ component PresetMenu {
     }
     menu := ContextMenuArea {
         Menu {
-            for item[i] in root.items: MenuItem { title: item; activated => { root.chosen(i); } }
+            for item[i] in root.items: MenuItem { title: item; enabled: i != root.current; activated => { root.chosen(i); } }
             if root.items.length > 0: MenuSeparator {}
-            MenuItem { title: @tr("Save as preset…"); activated => { root.save(); } }
-            MenuItem { title: @tr("Load from file…"); activated => { root.load-file(); } }
-            MenuItem { title: @tr("Show presets folder"); activated => { root.show-folder(); } }
+            MenuItem { title: @tr("New preset…"); activated => { root.new(); } }
+            if root.current >= 0: MenuItem { title: @tr("Update with current settings"); activated => { root.update(); } }
+            if root.current >= 0: MenuItem { title: @tr("Rename…"); activated => { root.rename(); } }
+            if root.current >= 0: MenuItem { title: @tr("Delete…"); activated => { root.delete(); } }
         }
         touch := TouchArea {
             mouse-cursor: pointer;
@@ -1557,14 +1560,17 @@ export component AppWindow inherits SheetWindow {
     // Rust renders a sharper preview once the zoom stops changing
     callback zoom-changed(float);
     in property <float> page-aspect: 210 / 297;
-    // presets: names in the presets folder, the one loaded or saved last, a line after save / load
+    // presets (kept inside the app): names, the chosen one (-1 none), 0 menu / 1 naming a new one / 2 renaming /
+    // 3 asking before delete, the name being typed, a line after a change
     in property <[string]> presets;
-    in property <string> preset-name;
-    in property <string> preset-status;
+    in-out property <int> preset: -1;
+    in-out property <int> preset-edit;
+    in-out property <string> preset-draft;
+    in-out property <string> preset-status;
     callback preset-chosen(int);
-    callback save-preset();
-    callback load-preset-file();
-    callback show-presets();
+    callback preset-update();
+    callback preset-commit();
+    callback preset-delete();
     // export
     in-out property <int> export-format: 3;
     in property <bool> exporting;
@@ -1884,16 +1890,66 @@ export component AppWindow inherits SheetWindow {
 
                 // presets and export stay at the bottom on every tab
                 SectionLabel { text: @tr("PRESET"); }
-                Row {
+                if root.preset-edit == 0: Row {
                     text: @tr("Preset");
                     PresetMenu {
                         items: root.presets;
-                        title: root.preset-name != "" ? root.preset-name : @tr("Choose…");
+                        current: root.preset;
+                        title: root.preset >= 0 ? root.presets[root.preset] : root.presets.length > 0 ? @tr("Choose…") : @tr("None yet");
                         chosen(i) => { root.preset-chosen(i); }
-                        save => { root.save-preset(); }
-                        load-file => { root.load-preset-file(); }
-                        show-folder => { root.show-presets(); }
+                        new => { root.preset-draft = ""; root.preset-status = ""; root.preset-edit = 1; }
+                        update => { root.preset-update(); }
+                        rename => { root.preset-draft = root.presets[root.preset]; root.preset-status = ""; root.preset-edit = 2; }
+                        delete => { root.preset-status = ""; root.preset-edit = 3; }
                     }
+                }
+                // name a new preset or rename the current one, right in the column
+                if root.preset-edit == 1 || root.preset-edit == 2: HorizontalLayout {
+                    spacing: 8px;
+                    FieldFrame {
+                        height: 26px;
+                        border-color: name-input.has-focus ? Theme.accent : Theme.line;
+                        if root.preset-draft == "": Text {
+                            x: 8px;
+                            height: parent.height;
+                            text: @tr("Name of the preset");
+                            font-size: 12px;
+                            color: Theme.faint;
+                            vertical-alignment: center;
+                        }
+                        name-input := TextInput {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height;
+                            text <=> root.preset-draft;
+                            font-size: 12px;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                            single-line: true;
+                            accessible-label: @tr("Name of the preset");
+                            init => { self.focus(); self.select-all(); }
+                            accepted => { root.preset-commit(); }
+                            key-pressed(e) => {
+                                if e.text == Key.Escape { root.preset-edit = 0; return accept; }
+                                reject
+                            }
+                        }
+                    }
+                    CheckButton { text: @tr("Cancel"); small: true; clicked => { root.preset-edit = 0; root.preset-status = ""; } }
+                    CheckButton { text: @tr("Save"); small: true; primary: true; enabled: root.preset-draft != ""; clicked => { root.preset-commit(); } }
+                }
+                if root.preset-edit == 3: HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: @tr("Delete “{}”?", root.presets[root.preset]);
+                        font-size: 12px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    CheckButton { text: @tr("Cancel"); small: true; clicked => { root.preset-edit = 0; } }
+                    CheckButton { text: @tr("Delete"); small: true; primary: true; clicked => { root.preset-delete(); } }
                 }
                 if root.preset-status != "": Para { text: root.preset-status; color: Theme.muted; }
                 SectionLabel { text: @tr("EXPORT"); }

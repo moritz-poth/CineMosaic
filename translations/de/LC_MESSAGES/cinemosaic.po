@@ -314,14 +314,32 @@ msgstr "PRESET"
 msgid "Preset"
 msgstr "Preset"
 
-msgid "Save as preset…"
-msgstr "Als Preset sichern…"
+msgid "New preset…"
+msgstr "Neues Preset…"
 
-msgid "Load from file…"
-msgstr "Aus Datei laden…"
+msgid "Update with current settings"
+msgstr "Mit aktuellen Einstellungen überschreiben"
 
-msgid "Show presets folder"
-msgstr "Preset-Ordner zeigen"
+msgid "Rename…"
+msgstr "Umbenennen…"
+
+msgid "Delete…"
+msgstr "Löschen…"
+
+msgid "Delete"
+msgstr "Löschen"
+
+msgid "None yet"
+msgstr "Noch keins"
+
+msgid "Name of the preset"
+msgstr "Name des Presets"
+
+msgid "Delete “{}”?"
+msgstr "„{}“ löschen?"
+
+msgid "Save"
+msgstr "Sichern"
 
 msgid "EXPORT"
 msgstr "EXPORT"

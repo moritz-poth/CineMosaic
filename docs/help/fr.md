@@ -50,9 +50,17 @@ Planche › Traits de coupe met la planche en page dans une zone au format de l�
 
 ## Préréglages
 
-Un préréglage garde l'aspect de la planche : papier, orientation, résolution, marge, espacement, colonnes, format d'image, traits de coupe, cadre, police, taille, style, couleur et place du titre, et le format d'export. Il ne garde ni la source ni le texte du titre : ils appartiennent au projet.
+Un préréglage garde l'aspect de la planche : papier, orientation, résolution, marge, espacement, colonnes, format d'image, traits de coupe, cadre, police, taille, style, couleur et place du titre, et le format d'export. Il ne garde ni la source ni le texte du titre : ils appartiennent au projet. Les préréglages restent dans CineMosaic.
 
-Sous **Préréglage**, choisissez **Enregistrer comme préréglage…** et donnez-lui un nom. Les préréglages enregistrés apparaissent dans le même menu ; en choisir un règle tous les champs d'un coup. **Charger depuis un fichier…** ouvre un préréglage de n'importe où, par exemple celui qu'un collègue vous a envoyé. **Afficher le dossier des préréglages** ouvre le dossier dans le Finder ; supprimez-y un préréglage. La police est gardée par son nom : si un Mac ne l'a pas, la police reste inchangée.
+Ouvrez le menu **Préréglage** en bas de la colonne latérale :
+
+- **Nouveau préréglage…** – tapez un nom et cliquez sur **Enregistrer** (Retour fonctionne aussi, Échap annule).
+- Choisir un préréglage dans la liste règle tous les champs d'un coup.
+- **Remplacer par les réglages actuels** – le préréglage choisi prend les champs tels qu'ils sont.
+- **Renommer…** – donne un nouveau nom au préréglage choisi.
+- **Supprimer…** – demande une fois, puis supprime le préréglage choisi.
+
+La police est gardée par son nom : si ce Mac ne l'a pas, la police reste inchangée.
 
 ## Enregistrer
 

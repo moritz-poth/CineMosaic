@@ -50,9 +50,17 @@ Sheet › Crop marks lays the sheet out in an area of the picture format inside 
 
 ## Presets
 
-A preset keeps the look of the sheet: paper, orientation, resolution, margin, gap, columns, picture format, crop marks, frame line, the headline's font, size, style, colour and place, and the export format. It does not keep the source or the headline text – they belong to the project.
+A preset keeps the look of the sheet: paper, orientation, resolution, margin, gap, columns, picture format, crop marks, frame line, the headline's font, size, style, colour and place, and the export format. It does not keep the source or the headline text – they belong to the project. Presets stay inside CineMosaic.
 
-Under **Preset**, choose **Save as preset…** and give it a name. Saved presets appear in the same menu; choosing one sets every field at once. **Load from file…** opens a preset from anywhere, for example one a colleague sent you. **Show presets folder** opens the folder in the Finder; delete a preset there. The font is kept by name: if a Mac does not have it, the font stays as it is.
+Open the **Preset** menu at the bottom of the side column:
+
+- **New preset…** – type a name and click **Save** (Return works too, Esc cancels).
+- Choose a preset from the list and every field is set at once.
+- **Update with current settings** – the chosen preset takes the fields as they are now.
+- **Rename…** – gives the chosen preset a new name.
+- **Delete…** – asks once, then removes the chosen preset.
+
+The font is kept by name: if this Mac does not have it, the font stays as it is.
 
 ## Saving
 

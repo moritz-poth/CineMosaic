@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use slint::{Model, ModelRc, SharedString, VecModel};
+use slint::{ModelRc, SharedString, VecModel};
 use cinemosaic::bin::{BinCut, sequences};
 use cinemosaic::timeline::{Rate, Shot, Timeline, format_tc};
 use cinemosaic::report::{self, Outcome, Report};
@@ -653,23 +653,50 @@ fn load_fonts(app: &AppWindow) {
     });
 }
 
-fn presets_dir() -> Option<PathBuf> {
-    app_dir().map(|d| d.join("Presets"))
+thread_local! {
+    /// the presets by name, sorted; loaded at start, written to presets.json after every change
+    static PRESETS: RefCell<Vec<(String, serde_json::Value)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Fills the Preset menu with the files in the presets folder, by name.
-fn list_presets(app: &AppWindow) {
-    let mut names: Vec<String> = presets_dir()
-        .and_then(|d| std::fs::read_dir(d).ok())
+fn presets_path() -> Option<PathBuf> {
+    app_dir().map(|d| d.join("presets.json"))
+}
+
+/// Reads presets.json (a missing or broken file = no presets) and fills the menu.
+fn show_presets(app: &AppWindow) {
+    let list: Vec<(String, serde_json::Value)> = presets_path()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<Vec<serde_json::Value>>(&b).ok())
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.path().file_name()?.to_str()?.strip_suffix(".json").map(str::to_string))
-        .filter(|n| !n.starts_with('.'))
+        .filter_map(|e| Some((e.get("name")?.as_str()?.to_string(), e.get("values")?.clone())))
         .collect();
-    names.sort_by_key(|n| n.to_lowercase());
-    let model: Vec<SharedString> = names.iter().map(|n| n.as_str().into()).collect();
+    PRESETS.with(|p| *p.borrow_mut() = list);
+    preset_menu(app);
+}
+
+fn preset_menu(app: &AppWindow) {
+    let model: Vec<SharedString> = PRESETS.with(|p| p.borrow().iter().map(|e| e.0.as_str().into()).collect());
     app.set_presets(ModelRc::new(VecModel::from(model)));
+}
+
+/// Writes all presets atomically and refreshes the menu; `status` is the line under it when saving works.
+fn store_presets(app: &AppWindow, status: String) {
+    preset_menu(app);
+    let list: Vec<serde_json::Value> = PRESETS.with(|p| p.borrow().iter().map(|(n, v)| serde_json::json!({"name": n, "values": v})).collect());
+    let result = presets_path().ok_or_else(|| std::io::Error::other("no home folder")).and_then(|path| {
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let part = path.with_extension("json.part");
+        std::fs::write(&part, serde_json::to_vec_pretty(&list).unwrap_or_default())?;
+        std::fs::rename(&part, &path)
+    });
+    match result {
+        Ok(()) => app.set_preset_status(status.into()),
+        Err(e) => {
+            log::write(&format!("presets not saved: {e}"));
+            app.set_preset_status(tr(["Could not save the presets: {}", "Presets ließen sich nicht sichern: {}", "Impossible d'enregistrer les préréglages : {}", "No se pudieron guardar los preajustes: {}"]).replacen("{}", &e.to_string(), 1).into());
+        }
+    }
 }
 
 /// Everything about the look of the sheet, as JSON: paper, picture format, line, headline style and place, crop
@@ -678,7 +705,6 @@ fn list_presets(app: &AppWindow) {
 fn preset_json(app: &AppWindow) -> serde_json::Value {
     let font = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned()).unwrap_or_default();
     serde_json::json!({
-        "cinemosaic-preset": 1,
         "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
         "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
@@ -731,60 +757,6 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("head-dx", &|s| app.set_head_dx(s));
     text("head-dy", &|s| app.set_head_dy(s));
     int("export-format", 3, &|n| app.set_export_format(n));
-}
-
-fn load_preset(app: &AppWindow, path: &Path) {
-    let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let read = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).filter(|v| v.get("cinemosaic-preset").is_some());
-    match read {
-        Some(v) => {
-            apply_preset(app, &v);
-            app.set_preset_name(name.as_str().into());
-            app.set_preset_status(SharedString::new());
-            log::write(&format!("preset loaded: {}", path.display()));
-            refresh(app);
-        }
-        None => {
-            app.set_preset_status(tr(["This file is not a CineMosaic preset.", "Diese Datei ist kein CineMosaic-Preset.", "Ce fichier n'est pas un préréglage CineMosaic.", "Este archivo no es un preajuste de CineMosaic."]).into());
-            log::write(&format!("preset not readable: {}", path.display()));
-        }
-    }
-}
-
-fn save_preset(app: &AppWindow) {
-    let Some(dir) = presets_dir() else { return };
-    let _ = std::fs::create_dir_all(&dir);
-    let suggested = if app.get_preset_name().is_empty() { "Preset".to_string() } else { app.get_preset_name().to_string() };
-    let Some(mut path) = rfd::FileDialog::new()
-        .set_title(tr(["Save as preset", "Als Preset sichern", "Enregistrer comme préréglage", "Guardar como preajuste"]))
-        .set_directory(&dir)
-        .set_file_name(format!("{suggested}.json"))
-        .add_filter("CineMosaic preset", &["json"])
-        .save_file()
-    else {
-        return;
-    };
-    if path.extension().is_none_or(|e| e != "json") {
-        path.set_extension("json");
-    }
-    let body = serde_json::to_vec_pretty(&preset_json(app)).unwrap_or_default();
-    // atomic: a half-written preset would not load
-    let part = path.with_extension("json.part");
-    let ok = std::fs::write(&part, body).and_then(|_| std::fs::rename(&part, &path));
-    match ok {
-        Ok(()) => {
-            let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            app.set_preset_name(name.as_str().into());
-            app.set_preset_status(SharedString::new());
-            log::write(&format!("preset saved: {}", path.display()));
-            list_presets(app);
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&part);
-            app.set_preset_status(tr(["Could not save the preset: {}", "Preset ließ sich nicht sichern: {}", "Impossible d'enregistrer le préréglage : {}", "No se pudo guardar el preajuste: {}"]).replacen("{}", &e.to_string(), 1).into());
-            log::write(&format!("preset save failed: {}: {e}", path.display()));
-        }
-    }
 }
 
 /// Picture format to crop to: None = full frame; Err = the custom field is not a format.
@@ -1520,38 +1492,82 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(save)
     });
-    list_presets(&app);
+    show_presets(&app);
     app.on_preset_chosen({
         let weak = app.as_weak();
         move |i| {
             let Some(app) = weak.upgrade() else { return };
-            let name = app.get_presets().row_data(i as usize).unwrap_or_default();
-            if let Some(dir) = presets_dir() {
-                load_preset(&app, &dir.join(format!("{name}.json")));
-            }
+            let Some((name, values)) = PRESETS.with(|p| p.borrow().get(i as usize).cloned()) else { return };
+            apply_preset(&app, &values);
+            app.set_preset(i);
+            app.set_preset_status(SharedString::new());
+            log::write(&format!("preset chosen: {name}"));
+            refresh(&app);
         }
     });
-    app.on_load_preset_file({
+    app.on_preset_update({
         let weak = app.as_weak();
         move || {
             let Some(app) = weak.upgrade() else { return };
-            let mut dialog = rfd::FileDialog::new().set_title(tr(["Load preset", "Preset laden", "Charger un préréglage", "Cargar preajuste"])).add_filter("CineMosaic preset", &["json"]);
-            if let Some(dir) = presets_dir() {
-                dialog = dialog.set_directory(dir);
-            }
-            if let Some(p) = dialog.pick_file() {
-                load_preset(&app, &p);
-            }
+            let values = preset_json(&app);
+            let i = app.get_preset() as usize;
+            let Some(name) = PRESETS.with(|p| p.borrow_mut().get_mut(i).map(|e| {
+                e.1 = values;
+                e.0.clone()
+            })) else { return };
+            store_presets(&app, tr(["“{}” now has the current settings.", "„{}“ hat jetzt die aktuellen Einstellungen.", "« {} » a maintenant les réglages actuels.", "«{}» tiene ahora los ajustes actuales."]).replacen("{}", &name, 1));
+            log::write(&format!("preset updated: {name}"));
         }
     });
-    app.on_save_preset({
+    app.on_preset_commit({
         let weak = app.as_weak();
-        move || weak.upgrade().iter().for_each(save_preset)
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let name: String = app.get_preset_draft().trim().chars().take(80).collect();
+            if name.is_empty() {
+                return;
+            }
+            let renaming = app.get_preset_edit() == 2;
+            let current = app.get_preset() as usize;
+            let taken = PRESETS.with(|p| p.borrow().iter().enumerate().any(|(i, (n, _))| n.eq_ignore_ascii_case(&name) && !(renaming && i == current)));
+            if taken {
+                app.set_preset_status(tr(["A preset with this name already exists.", "Ein Preset mit diesem Namen gibt es schon.", "Un préréglage porte déjà ce nom.", "Ya existe un preajuste con este nombre."]).into());
+                return;
+            }
+            let values = preset_json(&app);
+            PRESETS.with(|p| {
+                let mut p = p.borrow_mut();
+                if renaming {
+                    if let Some(e) = p.get_mut(current) {
+                        log::write(&format!("preset renamed: {} -> {name}", e.0));
+                        e.0 = name.clone();
+                    }
+                } else {
+                    log::write(&format!("preset saved: {name}"));
+                    p.push((name.clone(), values));
+                }
+                p.sort_by_key(|e| e.0.to_lowercase());
+            });
+            let i = PRESETS.with(|p| p.borrow().iter().position(|e| e.0 == name)).map_or(-1, |i| i as i32);
+            app.set_preset(i);
+            app.set_preset_edit(0);
+            store_presets(&app, String::new());
+        }
     });
-    app.on_show_presets(|| {
-        if let Some(dir) = presets_dir() {
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = std::process::Command::new("open").arg(dir).spawn();
+    app.on_preset_delete({
+        let weak = app.as_weak();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let i = app.get_preset() as usize;
+            if let Some((name, _)) = PRESETS.with(|p| {
+                let mut p = p.borrow_mut();
+                (i < p.len()).then(|| p.remove(i))
+            }) {
+                log::write(&format!("preset deleted: {name}"));
+            }
+            app.set_preset(-1);
+            app.set_preset_edit(0);
+            store_presets(&app, String::new());
         }
     });
     app.on_reveal(|| {
