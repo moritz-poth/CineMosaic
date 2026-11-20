@@ -487,9 +487,34 @@ fn apply_all(app: &AppWindow, others: &Others, s: &Settings) {
     }
 }
 
-fn cache_dir() -> PathBuf {
+fn cache_root() -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    home.join("Library/Caches/CineMosaic/stills")
+    home.join("Library/Caches/CineMosaic")
+}
+
+/// This run's stills: one folder per process, so two open copies of the app never delete each other's stills.
+fn cache_dir() -> PathBuf {
+    cache_root().join(format!("stills-{}", std::process::id()))
+}
+
+/// Removes the stills this app left behind: at the start the folders of runs that are over (a crash or a forced
+/// quit leaves them), at the end this run's own. Only folders named "stills…" inside the app's cache folder.
+fn clean_stills(own_too: bool) {
+    let running = |pid: &str| std::process::Command::new("/bin/ps").args(["-p", pid]).output().is_ok_and(|o| o.status.success());
+    for e in std::fs::read_dir(cache_root()).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let stale = match name.strip_prefix("stills-") {
+            Some(pid) if pid == std::process::id().to_string() => own_too,
+            Some(pid) => !running(pid),
+            None => name == "stills", // folder of the first versions
+        };
+        if stale && e.path().is_dir() {
+            match std::fs::remove_dir_all(e.path()) {
+                Ok(()) => log::write(&format!("removed stills {name}")),
+                Err(err) => log::write(&format!("could not remove stills {name}: {err}")),
+            }
+        }
+    }
 }
 
 /// Long names shortened in the middle, so start and end stay visible.
@@ -1048,6 +1073,7 @@ fn main() -> Result<(), slint::PlatformError> {
     #[cfg(target_os = "macos")]
     mac_window::srgb_windows();
     let settings = Rc::new(RefCell::new(load_settings()));
+    clean_stills(false);
     let app = AppWindow::new()?;
     repaint_on_resize!(app);
     let set_language = |code: &str| {
@@ -1417,7 +1443,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
     load_fonts(&app);
     refresh(&app);
-    app.run()
+    let result = app.run();
+    // the stills are only needed while the app is open
+    clean_stills(true);
+    result
 }
 
 /// The Sequence menu: "All sequences", then every sequence of the bin.

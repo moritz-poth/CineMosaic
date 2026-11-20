@@ -58,6 +58,6 @@ CineMosaic › Réglages… (⌘,) contient Clair/Sombre et la langue (English, 
 
 ## Bon à savoir
 
-CineMosaic lit les images avec FFmpeg. Les images sont gardées dans ~/Library/Caches/CineMosaic jusqu’à la prochaine extraction. Si macOS demande si CineMosaic peut accéder aux fichiers d’un volume amovible ou réseau, autorisez-le – tant que vous ne répondez pas, la lecture du volume attend.
+CineMosaic lit les images avec FFmpeg. Les images sont gardées dans ~/Library/Caches/CineMosaic tant que l’app est ouverte et supprimées quand vous la quittez (les restes d’un plantage au démarrage suivant). Si macOS demande si CineMosaic peut accéder aux fichiers d’un volume amovible ou réseau, autorisez-le – tant que vous ne répondez pas, la lecture du volume attend.
 
 Avid et Media Composer sont des marques d’Avid Technology, Inc. CineMosaic n’est pas affilié à Avid.

@@ -13,7 +13,7 @@ One still from the middle of every shot of a cut, laid out on one sheet (contact
 
 ## Layout
 - `src/timeline.rs` model + timecode (`Item.key` / `Shot.key` + `item_start` let bin mode find the component again), `edl.rs`, `fcp7.rs`, `fcpxml.rs` readers, `frames.rs` ffprobe/ffmpeg, `layout.rs` grid + render, `export.rs` files, `lib.rs` `read_cut_list`, `grab_stills` (4 parallel, `Gate` pause/cancel), `main.rs` test CLI.
-- `src/app.rs` + `ui/app.slint`: window 1180 × 780 (side column 380 px, preview right). State in a thread_local `STATE`; stills in `~/Library/Caches/CineMosaic/stills`, 480 px copies in memory for the preview (drawn at 1800 px long side on the UI thread). Number fields accept a decimal comma; an unreadable field turns red and the preview keeps its last good state.
+- `src/app.rs` + `ui/app.slint`: window 1180 × 780 (side column 380 px, preview right). State in a thread_local `STATE`; stills in `~/Library/Caches/CineMosaic/stills-<pid>` (one folder per process; `clean_stills`: at start the folders of processes no longer running + the old `stills`, at quit its own – checked 2026-11-20), 480 px copies in memory for the preview (drawn at 1800 px long side on the UI thread). Number fields accept a decimal comma; an unreadable field turns red and the preview keeps its last good state.
 - Screenshots: `screencapture -l` gave white images; a temp hook that calls `app.window().take_snapshot()` and quits works (removed again, re-add when needed).
 - `tests/master.rs` proves the exact frame on a generated master (pixel colour = frame number).
 

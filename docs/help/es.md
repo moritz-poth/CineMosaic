@@ -58,6 +58,6 @@ CineMosaic › Ajustes… (⌘,) tiene Claro/Oscuro y el idioma (English, Deutsc
 
 ## Bueno saber
 
-CineMosaic lee los fotogramas con FFmpeg. Los fotogramas se guardan en ~/Library/Caches/CineMosaic hasta la siguiente extracción. Si macOS pregunta si CineMosaic puede acceder a archivos de un volumen extraíble o de red, permítelo: hasta que respondas, la lectura del volumen espera.
+CineMosaic lee los fotogramas con FFmpeg. Los fotogramas se guardan en ~/Library/Caches/CineMosaic mientras la app está abierta y se borran al cerrarla (los restos de un fallo, en el siguiente inicio). Si macOS pregunta si CineMosaic puede acceder a archivos de un volumen extraíble o de red, permítelo: hasta que respondas, la lectura del volumen espera.
 
 Avid y Media Composer son marcas de Avid Technology, Inc. CineMosaic no está afiliado a Avid.

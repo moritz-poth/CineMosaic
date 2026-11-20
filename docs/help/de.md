@@ -58,6 +58,6 @@ CineMosaic › Einstellungen… (⌘,) enthält Hell/Dunkel und die Sprache (Eng
 
 ## Gut zu wissen
 
-CineMosaic liest die Frames mit FFmpeg. Die Stills liegen bis zum nächsten Holen in ~/Library/Caches/CineMosaic. Fragt macOS, ob CineMosaic auf Dateien eines Wechsel- oder Netzwerk-Volumes zugreifen darf, erlaube es – bis du antwortest, wartet das Lesen des Volumes.
+CineMosaic liest die Frames mit FFmpeg. Die Stills liegen in ~/Library/Caches/CineMosaic, solange die App offen ist, und werden beim Beenden gelöscht (Reste nach einem Absturz beim nächsten Start). Fragt macOS, ob CineMosaic auf Dateien eines Wechsel- oder Netzwerk-Volumes zugreifen darf, erlaube es – bis du antwortest, wartet das Lesen des Volumes.
 
 Avid und Media Composer sind Marken von Avid Technology, Inc. CineMosaic steht in keiner Verbindung zu Avid.

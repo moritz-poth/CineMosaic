@@ -58,6 +58,6 @@ CineMosaic › Settings… (⌘,) has Light/Dark and the language (English, Deut
 
 ## Good to know
 
-CineMosaic reads the frames with FFmpeg. The stills are kept in ~/Library/Caches/CineMosaic until the next grab. When macOS asks whether CineMosaic may access files on a removable or network volume, allow it – until you answer, reading the volume waits.
+CineMosaic reads the frames with FFmpeg. The stills are kept in ~/Library/Caches/CineMosaic while the app is open and deleted when you quit it (left-overs of a crash at the next start). When macOS asks whether CineMosaic may access files on a removable or network volume, allow it – until you answer, reading the volume waits.
 
 Avid and Media Composer are trademarks of Avid Technology, Inc. CineMosaic is not affiliated with Avid.
