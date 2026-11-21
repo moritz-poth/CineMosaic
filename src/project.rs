@@ -23,8 +23,9 @@ pub struct Still {
 pub struct Project {
     /// 0 master + cut list, 1 Media Composer bin
     pub mode: i32,
-    pub master: Option<PathBuf>,
-    pub list: Option<PathBuf>,
+    /// master mode: master files and cut lists (a master and the list with the same name belong together)
+    pub masters: Vec<PathBuf>,
+    pub lists: Vec<PathBuf>,
     pub bin: Option<PathBuf>,
     /// bin mode, projects before 2026-11-21: 0 all sequences, 1.. one of them
     pub sequence: i32,
@@ -73,8 +74,15 @@ struct FileProject {
     app: String,
     format: u32,
     mode: i32,
+    /// projects before 2026-11-21 (one master, one list)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     master: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     list: Option<PathBuf>,
+    #[serde(default)]
+    masters: Vec<PathBuf>,
+    #[serde(default)]
+    lists: Vec<PathBuf>,
     bin: Option<PathBuf>,
     sequence: i32,
     #[serde(default)]
@@ -132,8 +140,10 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         app: "CineMosaic".into(),
         format: FORMAT,
         mode: p.mode,
-        master: p.master.clone(),
-        list: p.list.clone(),
+        master: None,
+        list: None,
+        masters: p.masters.clone(),
+        lists: p.lists.clone(),
         bin: p.bin.clone(),
         sequence: p.sequence,
         chosen: p.chosen.clone(),
@@ -212,8 +222,8 @@ pub fn load(path: &Path) -> Result<Project, String> {
         .collect();
     Ok(Project {
         mode: fp.mode,
-        master: local(fp.master),
-        list: local(fp.list),
+        masters: fp.masters.into_iter().chain(fp.master).filter(|p| p.is_absolute()).collect(),
+        lists: fp.lists.into_iter().chain(fp.list).filter(|p| p.is_absolute()).collect(),
         bin: local(fp.bin),
         sequence: fp.sequence,
         chosen: fp.chosen,
@@ -244,8 +254,8 @@ mod tests {
         let shot = Shot { name: "A".into(), start: 0, end: 90, track: 0, key: 3, item_start: 0 };
         let p = Project {
             mode: 0,
-            master: Some("/m.mov".into()),
-            list: Some("/c.edl".into()),
+            masters: vec!["/m.mov".into()],
+            lists: vec!["/c.edl".into()],
             bin: None,
             sequence: 0,
             chosen: Some(vec!["Reel 1".into()]),
@@ -278,7 +288,7 @@ mod tests {
         std::fs::remove_file(path.join("stills/00001.png")).unwrap();
         std::os::unix::fs::symlink(&still, path.join("stills/00001.png")).unwrap();
         let bad = load(&path).unwrap();
-        assert_eq!(bad.master, None);
+        assert!(bad.masters.is_empty());
         assert!(bad.stills[0].file.is_err() && bad.stills[0].job.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }

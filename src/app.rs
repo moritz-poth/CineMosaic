@@ -26,8 +26,9 @@ const THUMB_W: u32 = 480;
 
 #[derive(Default)]
 struct State {
-    master: Option<(PathBuf, frames::VideoInfo)>,
-    list: Option<PathBuf>,
+    /// master mode: master files and cut lists; a master and the list with the same file name belong together
+    masters: Vec<(PathBuf, frames::VideoInfo)>,
+    lists: Vec<PathBuf>,
     timeline: Option<Timeline>,
     shots: Vec<Shot>,
     /// full-size stills on disk (export) and small copies (preview), by shot and place in the shot; a sheet change
@@ -43,6 +44,8 @@ struct State {
     project_saved: Option<serde_json::Value>,
     /// an opened project's shots and stills, waiting for its source to be read again
     carry: Option<Carry>,
+    /// headline font a project or preset asked for, by name, until the font list is loaded
+    font_wanted: Option<String>,
     /// this window's preview renderer and the generation of its newest job
     renderer: std::cell::OnceCell<(std::sync::mpsc::Sender<RenderJob>, Arc<AtomicUsize>)>,
     gate: Arc<Gate>,
@@ -77,7 +80,7 @@ struct Carry {
 
 impl State {
     fn frame_aspect(&self) -> f64 {
-        self.still_aspect.or(self.master.as_ref().map(|m| m.1.aspect)).unwrap_or(16.0 / 9.0)
+        self.still_aspect.or(self.masters.first().map(|m| m.1.aspect)).unwrap_or(16.0 / 9.0)
     }
     fn rate(&self) -> Rate {
         self.timeline.as_ref().map_or(Rate { num: 25, den: 1 }, |t| t.rate)
@@ -778,11 +781,48 @@ fn load_fonts() {
 fn show_fonts(app: &AppWindow) {
     FONTS.with(|f| {
         let names = f.borrow();
-        let pick = ["Helvetica Neue", "Helvetica", "Arial"].iter().find_map(|w| names.iter().position(|n| n == w)).unwrap_or(0);
         let model: Vec<SharedString> = names.iter().map(|n| n.as_str().into()).collect();
         app.set_fonts(ModelRc::new(VecModel::from(model)));
-        app.set_font(pick as i32);
+        app.set_font(default_font(&names) as i32);
     });
+    // a project or preset opened while the fonts were still loading gets its font now
+    apply_font(app);
+}
+
+/// The standard headline font: Helvetica Neue, else Helvetica, else Arial, else the first.
+fn default_font(names: &[String]) -> usize {
+    ["Helvetica Neue", "Helvetica", "Arial"].iter().find_map(|w| names.iter().position(|n| n == w)).unwrap_or(0)
+}
+
+/// Sets the font a project or preset asked for, by name, once the font list is loaded. A font this Mac does not
+/// have: first say so (with its name), then take the standard font.
+fn apply_font(app: &AppWindow) {
+    if FONTS.with(|f| f.borrow().is_empty()) {
+        return; // still loading: show_fonts comes back here
+    }
+    let Some(name) = with_state(app, |st| st.borrow_mut().font_wanted.take()) else { return };
+    let (found, fallback) = FONTS.with(|f| {
+        let names = f.borrow();
+        let d = default_font(&names);
+        (names.iter().position(|n| *n == name), (d, names.get(d).cloned().unwrap_or_default()))
+    });
+    match found {
+        Some(i) => app.set_font(i as i32),
+        None => {
+            log::write(&format!("font not installed: {name}"));
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title(tr(["Font not installed", "Schrift nicht installiert", "Police non installée", "Fuente no instalada"]))
+                .set_description(
+                    tr(["The font “{f}” cannot be loaded – it is not installed on this Mac. The headline is set in the standard font, {d}, instead.", "Die Schrift „{f}“ lässt sich nicht laden – sie ist auf diesem Mac nicht installiert. Die Headline wird deshalb in der Standardschrift {d} gesetzt.", "La police « {f} » ne peut pas être chargée – elle n’est pas installée sur ce Mac. Le titre utilise donc la police standard, {d}.", "No se puede cargar la fuente «{f}»: no está instalada en este Mac. Por eso el título usa la fuente estándar, {d}."])
+                        .replace("{f}", &name)
+                        .replace("{d}", &fallback.1),
+                )
+                .show();
+            app.set_font(fallback.0 as i32);
+        }
+    }
+    refresh(app);
 }
 
 thread_local! {
@@ -843,7 +883,7 @@ fn preset_json(app: &AppWindow) -> serde_json::Value {
         "px-units": app.get_px_units(), "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
         "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
-        "picture": app.get_picture(), "aspect-w": app.get_aspect_w().as_str(), "aspect-h": app.get_aspect_h().as_str(), "trim": app.get_trim(),
+        "picture": app.get_picture(), "aspect": app.get_aspect().as_str(), "trim": app.get_trim(),
         "line-on": app.get_line_on(), "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
         "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
         "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
@@ -872,20 +912,17 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("gap", &|s| app.set_gap(s));
     boolean("auto-cols", &|b| app.set_auto_cols(b));
     text("cols", &|s| app.set_cols(s));
-    if v.get("aspect-w").is_some() {
+    let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    if let Some(a) = field("aspect").or_else(|| Some(format!("{}:{}", field("aspect-w")?, field("aspect-h")?))) {
+        // since 2026-11-21: the format as typed ("2.39:1", "9:16"); for a few hours two fields
         int("picture", layout::PICTURE.len() as i64 + 1, &|n| app.set_picture(n));
-        text("aspect-w", &|s| app.set_aspect_w(s));
-        text("aspect-h", &|s| app.set_aspect_h(s));
+        app.set_aspect(a.into());
     } else {
-        // presets from before the two fields: 1–7 = the film formats as now, 8 = Custom "2.39" or "21:9"
+        // presets from before: 1–7 = the film formats as now, 8 = Custom "2.39" or "21:9"
         int("picture", 8, &|n| app.set_picture(n));
         if app.get_picture() == 8 {
-            let (w, h) = v.get("custom-aspect").and_then(|x| x.as_str()).and_then(|c| {
-                let c = c.replace(',', ".");
-                c.split_once(':').map(|(w, h)| (w.trim().to_string(), h.trim().to_string())).or(Some((c.trim().to_string(), "1".into())))
-            }).unwrap_or(("2.39".into(), "1".into()));
-            app.set_aspect_w(w.into());
-            app.set_aspect_h(h.into());
+            let c = field("custom-aspect").unwrap_or_else(|| "2.39".into());
+            app.set_aspect(if c.contains(':') { c } else { format!("{c}:1") }.into());
             picture_edited(app);
         }
     }
@@ -896,10 +933,9 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("line-inset", &|s| app.set_line_inset(s));
     text("line-color", &|s| app.set_line_color(s));
     int("line-pattern", layout::Pattern::ALL.len() as i64 - 1, &|n| app.set_line_pattern(n));
-    if let Some(name) = v.get("font").and_then(|x| x.as_str())
-        && let Some(i) = FONTS.with(|f| f.borrow().iter().position(|n| n == name))
-    {
-        app.set_font(i as i32);
+    if let Some(name) = v.get("font").and_then(|x| x.as_str()).filter(|n| !n.is_empty()) {
+        with_state(app, |st| st.borrow_mut().font_wanted = Some(name.to_string()));
+        apply_font(app);
     }
     text("head-size", &|s| app.set_head_size(s));
     boolean("head-bold", &|b| app.set_head_bold(b));
@@ -944,7 +980,7 @@ fn read_picture(app: &AppWindow) -> Result<Option<f64>, &'static str> {
     if app.get_picture() == 0 {
         return Ok(None);
     }
-    layout::parse_aspect(&format!("{}:{}", app.get_aspect_w(), app.get_aspect_h())).map(Some).ok_or("aspect")
+    layout::parse_aspect(&app.get_aspect()).map(Some).ok_or("aspect")
 }
 
 /// The picture-format menu: Full frame, the film formats, the social media formats (with their platforms), Custom;
@@ -965,7 +1001,7 @@ fn picture_menu(app: &AppWindow) {
     app.set_picture_menu(ModelRc::new(VecModel::from(items)));
 }
 
-/// A format from the menu: its width : height into the two fields (Full frame shows the stills' own format).
+/// A format from the menu: its width : height into the field (Full frame shows the stills' own format).
 fn show_picture(app: &AppWindow) {
     let i = app.get_picture() as usize;
     let (w, h) = match i {
@@ -977,8 +1013,7 @@ fn show_picture(app: &AppWindow) {
         i if i <= layout::PICTURE.len() => layout::PICTURE[i - 1],
         _ => return, // Custom keeps what is typed
     };
-    app.set_aspect_w(layout::ratio_text(w).into());
-    app.set_aspect_h(layout::ratio_text(h).into());
+    app.set_aspect(format!("{}:{}", layout::ratio_text(w), layout::ratio_text(h)).into());
 }
 
 /// The button text of the picture-format menu.
@@ -994,7 +1029,7 @@ fn picture_label(app: &AppWindow) {
 
 /// Width : height typed or dragged: the menu shows the format it matches, else Custom.
 fn picture_edited(app: &AppWindow) {
-    if let Some(a) = layout::parse_aspect(&format!("{}:{}", app.get_aspect_w(), app.get_aspect_h())) {
+    if let Some(a) = layout::parse_aspect(&app.get_aspect()) {
         let found = layout::PICTURE.iter().position(|(w, h)| (w / h - a).abs() < 0.0005);
         app.set_picture(found.map_or(layout::PICTURE.len() + 1, |i| i + 1) as i32);
     } else if app.get_picture() == 0 {
@@ -1149,36 +1184,96 @@ fn describe(t: &Timeline, shots: &[Shot], sequences: usize) -> String {
         .replace("{tc}", &format_tc(first, t.rate))
 }
 
-/// Master and cut list both chosen: read the list and show what it holds.
+/// File name without extension, for pairing a master with its cut list (case ignored).
+fn stem(p: &Path) -> String {
+    p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// Master mode: each master (by index) with the cut list of the same name, in the masters' order.
+fn pairs(st: &State) -> Vec<(usize, PathBuf)> {
+    st.masters.iter().enumerate().filter_map(|(i, (m, _))| st.lists.iter().find(|l| stem(l) == stem(m)).map(|l| (i, l.clone()))).collect()
+}
+
+/// The source line in master mode: shots, rate, tracks; one master: where it starts, several: how many.
+fn master_text(st: &State) -> String {
+    let (Some(t), Some(first)) = (&st.timeline, st.shots.first()) else { return String::new() };
+    let pairs = st.sequences.max(1);
+    let mut text = if pairs > 1 {
+        tr(["{n} shots from {m} master files · {r} fps", "{n} Shots aus {m} Masterfiles · {r} fps", "{n} plans de {m} fichiers master · {r} i/s", "{n} planos de {m} archivos máster · {r} fps"])
+            .replace("{n}", &st.shots.len().to_string())
+            .replace("{m}", &pairs.to_string())
+            .replace("{r}", &fps_text(t.rate.fps()))
+    } else {
+        let info = &st.masters[first.key.min(st.masters.len() - 1)].1;
+        tr(["{} · master starts at {}", "{} · Master beginnt bei {}", "{} · le master commence à {}", "{} · el máster empieza en {}"])
+            .replacen("{}", &describe(t, &st.shots, 1), 1)
+            .replacen("{}", &format_tc(info.start_tc, info.rate), 1)
+    };
+    let before = st.shots.iter().filter(|s| st.masters.get(s.key).is_some_and(|m| s.middle() < m.1.start_tc)).count();
+    if before > 0 {
+        text += &tr([" · {} lie before the master’s start: check the master’s timecode", " · {} liegen vor dem Start des Masters: Timecode des Masters prüfen", " · {} se trouvent avant le début du master : vérifiez son timecode", " · {} quedan antes del inicio del máster: revisa su timecode"]).replace("{}", &before.to_string());
+    }
+    text
+}
+
+/// Master mode: reads the cut list of every master (same file name) and shows what they hold, one after the other.
+/// In master mode a shot's `key` is the index of its master.
 fn load_source(app: &AppWindow) {
     with_state(app, |st| {
         let mut st = st.borrow_mut();
         clear_source(app, &mut st);
-        let (Some((_, info)), Some(list)) = (st.master.clone(), st.list.clone()) else { return adopt_carry(app, &mut st) };
-        match read_cut_list(&list, info.rate) {
-            Ok(t) => {
-                let shots = t.shots();
-                if shots.is_empty() {
-                    app.set_source_error(tr(["The cut list has no video clips.", "Die Schnittliste enthält keine Videoclips.", "La liste de montage ne contient aucun clip vidéo.", "La lista de montaje no tiene clips de vídeo."]).into());
-                    return;
-                }
-                let before = shots.iter().filter(|s| s.middle() < info.start_tc).count();
-                let mut text = tr(["{} · master starts at {}", "{} · Master beginnt bei {}", "{} · le master commence à {}", "{} · el máster empieza en {}"])
-                    .replacen("{}", &describe(&t, &shots, 1), 1)
-                    .replacen("{}", &format_tc(info.start_tc, info.rate), 1);
-                if before > 0 {
-                    text += &tr([" · {} lie before the master’s start: check the master’s timecode", " · {} liegen vor dem Start des Masters: Timecode des Masters prüfen", " · {} se trouvent avant le début du master : vérifiez son timecode", " · {} quedan antes del inicio del máster: revisa su timecode"]).replace("{}", &before.to_string());
-                }
-                app.set_source_info(text.into());
-                app.set_can_grab(true);
-                st.shots = shots;
-                st.timeline = Some(t);
+        let pairs = pairs(&st);
+        let mut problems: Vec<String> = vec![];
+        let names = |v: Vec<&Path>| v.into_iter().map(file_name).collect::<Vec<_>>().join(", ");
+        let lone_masters: Vec<&Path> = st.masters.iter().enumerate().filter(|(i, _)| !pairs.iter().any(|p| p.0 == *i)).map(|(_, m)| m.0.as_path()).collect();
+        let lone_lists: Vec<&Path> = st.lists.iter().filter(|l| !st.masters.iter().any(|m| stem(&m.0) == stem(l))).map(|l| l.as_path()).collect();
+        // only once both kinds were chosen: before that the empty side is simply still to come
+        if !st.masters.is_empty() && !st.lists.is_empty() {
+            if !lone_masters.is_empty() {
+                problems.push(tr(["No cut list with the same name for {}", "Keine Schnittliste mit gleichem Namen für {}", "Aucune liste de montage du même nom pour {}", "No hay lista de montaje con el mismo nombre para {}"]).replace("{}", &names(lone_masters)));
             }
-            Err(e) => app.set_source_error(e.into()),
+            if !lone_lists.is_empty() {
+                problems.push(tr(["No master file with the same name for {}", "Kein Masterfile mit gleichem Namen für {}", "Aucun fichier master du même nom pour {}", "No hay archivo máster con el mismo nombre para {}"]).replace("{}", &names(lone_lists)));
+            }
+        }
+        let mut shots = vec![];
+        let mut first: Option<Timeline> = None;
+        for (i, list) in &pairs {
+            match read_cut_list(list, st.masters[*i].1.rate) {
+                Ok(t) => {
+                    shots.extend(t.shots().into_iter().map(|mut s| {
+                        s.key = *i;
+                        s
+                    }));
+                    first.get_or_insert(t);
+                }
+                Err(e) => problems.push(format!("{}: {e}", file_name(list))),
+            }
+        }
+        if !pairs.is_empty() && shots.is_empty() && problems.is_empty() {
+            problems.push(tr(["The cut list has no video clips.", "Die Schnittliste enthält keine Videoclips.", "La liste de montage ne contient aucun clip vidéo.", "La lista de montaje no tiene clips de vídeo."]));
+        }
+        app.set_source_error(problems.join(" · ").into());
+        if let Some(t) = first.filter(|_| !shots.is_empty()) {
+            st.shots = shots;
+            st.timeline = Some(t);
+            st.sequences = pairs.len();
+            app.set_source_info(master_text(&st).into());
+            app.set_can_grab(true);
         }
         adopt_carry(app, &mut st);
     });
     refresh(app);
+}
+
+/// The master and cut-list lists of the Source tab.
+fn show_files(app: &AppWindow) {
+    let (m, l): (Vec<SharedString>, Vec<SharedString>) = with_state(app, |st| {
+        let st = st.borrow();
+        (st.masters.iter().map(|m| file_name(&m.0).into()).collect(), st.lists.iter().map(|l| file_name(l).into()).collect())
+    });
+    app.set_master_names(ModelRc::new(VecModel::from(m)));
+    app.set_list_names(ModelRc::new(VecModel::from(l)));
 }
 
 fn time_left(start: Instant, done: usize, total: usize) -> String {
@@ -1196,7 +1291,7 @@ fn time_left(start: Instant, done: usize, total: usize) -> String {
 /// Grabs the stills the sheet needs that are not there yet; when none are missing, all of them again.
 fn grab(app: &AppWindow) {
     let Ok((sheet, picture)) = read_all(app) else { return };
-    let (shots, wanted, fresh, master, cut, volumes, rate, gate, dir, done) = with_state(app, |st| {
+    let (shots, wanted, fresh, masters, cut, volumes, rate, gate, dir, done) = with_state(app, |st| {
         let mut st = st.borrow_mut();
         let all = st.picks(&sheet, picture);
         let missing: Vec<Pick> = all.iter().filter(|p| !st.stills.contains_key(p)).copied().collect();
@@ -1213,10 +1308,10 @@ fn grab(app: &AppWindow) {
         // each window its own folder: grabbing everything again empties only its own
         let base = cache_dir().join(format!("window-{}", app.get_win_id()));
         let dir = base.join(format!("grab-{}", st.grabs));
-        (st.shots.clone(), if fresh { all } else { missing }, fresh, st.master.clone(), st.cut.clone(), volumes, st.rate(), st.gate.clone(), (base, dir), st.done.clone())
+        (st.shots.clone(), if fresh { all } else { missing }, fresh, st.masters.clone(), st.cut.clone(), volumes, st.rate(), st.gate.clone(), (base, dir), st.done.clone())
     });
     let bin_mode = app.get_mode() == 1;
-    if (bin_mode && cut.is_none()) || (!bin_mode && master.is_none()) {
+    if (bin_mode && cut.is_none()) || (!bin_mode && masters.is_empty()) {
         return;
     }
     app.set_state(1);
@@ -1230,10 +1325,22 @@ fn grab(app: &AppWindow) {
     refresh(app);
     let weak = app.as_weak();
     std::thread::spawn(move || {
-        let jobs = match (&cut, &master) {
-            (Some(cut), _) if bin_mode => cut.jobs(&shots, &wanted, &volumes, &|| gate.go(), LANGUAGES[LANG.load(Ordering::Relaxed)].0),
-            (_, Some((path, info))) => master_jobs(&shots, &wanted, path, info, LANGUAGES[LANG.load(Ordering::Relaxed)].0),
-            _ => return,
+        let lang = LANGUAGES[LANG.load(Ordering::Relaxed)].0;
+        let jobs = match &cut {
+            Some(cut) if bin_mode => cut.jobs(&shots, &wanted, &volumes, &|| gate.go(), lang),
+            _ if bin_mode => return,
+            // every still from its own master (the shot's key)
+            _ => {
+                let mut jobs: Vec<Option<Result<Job, String>>> = vec![None; wanted.len()];
+                for (m, (path, info)) in masters.iter().enumerate() {
+                    let mine: Vec<usize> = (0..wanted.len()).filter(|&k| shots[wanted[k].0].key == m).collect();
+                    let picks: Vec<Pick> = mine.iter().map(|&k| wanted[k]).collect();
+                    for (k, j) in mine.into_iter().zip(master_jobs(&shots, &picks, path, info, lang)) {
+                        jobs[k] = Some(j);
+                    }
+                }
+                jobs.into_iter().map(|j| j.unwrap_or_else(|| Err("no master file".into()))).collect()
+            }
         };
         if fresh {
             let _ = std::fs::remove_dir_all(&dir.0); // stills of an earlier run
@@ -1424,7 +1531,7 @@ fn save(app: &AppWindow) {
     let (stills, aspect, name) = with_state(app, |st| {
         let st = st.borrow();
         let name = st.timeline.as_ref().map(|t| t.name.trim().to_string()).filter(|n| !n.is_empty());
-        let name = name.or_else(|| st.list.as_ref().or(st.bin.as_ref()).and_then(|l| l.file_stem()).map(|s| s.to_string_lossy().into_owned()));
+        let name = name.or_else(|| st.lists.first().or(st.bin.as_ref()).and_then(|l| l.file_stem()).map(|s| s.to_string_lossy().into_owned()));
         let stills: Vec<Option<PathBuf>> = st.picks(&sheet, picture).iter().map(|p| st.stills.get(p).and_then(|r| r.as_ref().ok()).cloned()).collect();
         (stills, picture.unwrap_or(st.frame_aspect()), name.unwrap_or_else(|| "CineMosaic".into()))
     });
@@ -1520,7 +1627,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
         "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
-        "master": st.master.as_ref().map(|m| m.0.clone()), "list": st.list, "bin": st.bin, "sequence": st.seq_on,
+        "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
     })
 }
@@ -1602,8 +1709,8 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
         let t = st.timeline.clone().unwrap_or(Timeline { name: String::new(), rate: st.rate(), tracks: vec![] });
         project::Project {
             mode: app.get_mode(),
-            master: st.master.as_ref().map(|m| m.0.clone()),
-            list: st.list.clone(),
+            masters: st.masters.iter().map(|m| m.0.clone()).collect(),
+            lists: st.lists.clone(),
             bin: st.bin.clone(),
             sequence: 0,
             chosen: (!st.seq_on.iter().all(|&on| on)).then(|| st.sequence_names.iter().zip(&st.seq_on).filter(|(_, on)| **on).map(|(n, _)| n.clone()).collect()),
@@ -1669,14 +1776,13 @@ fn open_project(app: &AppWindow, path: PathBuf) {
     app.set_headline(p.headline.clone().into());
     app.set_mode(p.mode.clamp(0, 1));
     let name = |o: &Option<PathBuf>| o.as_deref().map(file_name).unwrap_or_default();
-    app.set_master_name(name(&p.master).into());
-    app.set_list_name(name(&p.list).into());
+
     app.set_bin_name(name(&p.bin).into());
     let gate = with_state(app, |st| {
         let mut st = st.borrow_mut();
         clear_source(app, &mut st);
-        st.master = None;
-        st.list = p.list.clone();
+        st.masters.clear();
+        st.lists = p.lists.clone();
         st.bin = p.bin.clone();
         st.volumes = p.volumes_off.iter().map(|v| (v.clone(), false)).collect();
         st.done = p.stills.iter().filter_map(|s| Some((s.job.clone()?, s.file.clone().ok()?))).collect();
@@ -1697,7 +1803,9 @@ fn open_project(app: &AppWindow, path: PathBuf) {
     std::thread::spawn(move || {
         let files: Vec<Result<PathBuf, String>> = p.stills.iter().map(|s| s.file.clone()).collect();
         let thumbs = thumbnails(&files, &gate).unwrap_or_default();
-        let info = p.master.as_ref().filter(|_| p.mode == 0).and_then(|m| frames::probe(m).ok().map(|i| (m.clone(), i)));
+        // masters not found drop out (with their shots); their names are said
+        let probed: Vec<(PathBuf, Result<frames::VideoInfo, String>)> =
+            p.masters.iter().filter(|_| p.mode == 0).map(|m| (m.clone(), frames::probe(m))).collect();
         let names = p.bin.as_ref().filter(|_| p.mode == 1).and_then(|b| avb::Bin::read(b).ok()).map(|b| sequences(&b));
         let _ = slint::invoke_from_event_loop(move || {
             let Some(app) = weak.upgrade() else { return };
@@ -1714,8 +1822,10 @@ fn open_project(app: &AppWindow, path: PathBuf) {
             with_state(&app, |st| {
                 let mut st = st.borrow_mut();
                 st.carry = Some(carry);
-                st.master = info;
+                st.masters = probed.iter().filter_map(|(m, i)| Some((m.clone(), i.clone().ok()?))).collect();
             });
+            show_files(&app);
+            let gone: Vec<String> = probed.iter().filter(|(_, i)| i.is_err()).map(|(m, _)| file_name(m)).collect();
             if let Some(names) = &names {
                 // the sequences chosen by name (older projects: one index, 0 = all)
                 let on: Vec<bool> = names
@@ -1738,6 +1848,11 @@ fn open_project(app: &AppWindow, path: PathBuf) {
                 load_bin(&app);
             } else {
                 load_source(&app);
+                if !gone.is_empty() {
+                    let shown = app.get_source_error();
+                    let msg = tr(["Master files not found: {}", "Masterfiles nicht gefunden: {}", "Fichiers master introuvables : {}", "Archivos máster no encontrados: {}"]).replace("{}", &gone.join(", "));
+                    app.set_source_error(if shown.is_empty() { msg } else { format!("{msg} · {shown}") }.into());
+                }
             }
         });
     });
@@ -1940,7 +2055,7 @@ fn close_window(app: &AppWindow) {
 fn pristine(app: &AppWindow) -> bool {
     with_state(app, |st| {
         let st = st.borrow();
-        st.project.is_none() && st.master.is_none() && st.list.is_none() && st.bin.is_none() && st.stills.is_empty()
+        st.project.is_none() && st.masters.is_empty() && st.lists.is_empty() && st.bin.is_none() && st.stills.is_empty()
     })
 }
 
@@ -2089,35 +2204,74 @@ fn wire_shared(app: &AppWindow, ctx: &Rc<Ctx>) {
 
 /// Source, grabbing, sheet, presets, export and the File menu of one project window.
 fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
+    // master files and cut lists are added (several at a time); the × removes one
     app.on_pick_master({
         let weak = app.as_weak();
         move || {
             let Some(app) = weak.upgrade() else { return };
-            let Some(p) = rfd::FileDialog::new().set_title(tr(["Master file", "Masterfile", "Fichier master", "Archivo máster"])).pick_file() else { return };
-            match frames::probe(&p) {
-                Ok(info) => {
-                    app.set_master_name(file_name(&p).into());
-                    with_state(&app, |st| st.borrow_mut().master = Some((p, info)));
+            let Some(files) = rfd::FileDialog::new().set_title(tr(["Master files", "Masterfiles", "Fichiers master", "Archivos máster"])).pick_files() else { return };
+            let mut errors = vec![];
+            for p in files {
+                if with_state(&app, |st| st.borrow().masters.iter().any(|m| m.0 == p)) {
+                    continue;
                 }
-                Err(e) => {
-                    app.set_master_name("".into());
-                    with_state(&app, |st| st.borrow_mut().master = None);
-                    app.set_source_error(e.into());
-                    return;
+                match frames::probe(&p) {
+                    Ok(info) => with_state(&app, |st| st.borrow_mut().masters.push((p, info))),
+                    Err(e) => errors.push(format!("{}: {e}", file_name(&p))),
                 }
             }
+            show_files(&app);
             load_source(&app);
+            if !errors.is_empty() {
+                let shown = app.get_source_error();
+                app.set_source_error(errors.into_iter().chain((!shown.is_empty()).then(|| shown.to_string())).collect::<Vec<_>>().join(" · ").into());
+            }
         }
     });
     app.on_pick_list({
         let weak = app.as_weak();
         move || {
             let Some(app) = weak.upgrade() else { return };
-            let Some(p) = rfd::FileDialog::new().set_title(tr(["Cut list", "Schnittliste", "Liste de montage", "Lista de montaje"])).add_filter("EDL, XML, FCPXML, AAF", &["edl", "xml", "fcpxml", "aaf"]).pick_file() else {
+            let Some(files) = rfd::FileDialog::new().set_title(tr(["Cut lists", "Schnittlisten", "Listes de montage", "Listas de montaje"])).add_filter("EDL, XML, FCPXML, AAF", &["edl", "xml", "fcpxml", "aaf"]).pick_files() else {
                 return;
             };
-            app.set_list_name(file_name(&p).into());
-            with_state(&app, |st| st.borrow_mut().list = Some(p));
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                for p in files {
+                    if !st.lists.contains(&p) {
+                        st.lists.push(p);
+                    }
+                }
+            });
+            show_files(&app);
+            load_source(&app);
+        }
+    });
+    app.on_remove_master({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                if (i as usize) < st.masters.len() {
+                    st.masters.remove(i as usize);
+                }
+            });
+            show_files(&app);
+            load_source(&app);
+        }
+    });
+    app.on_remove_list({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                if (i as usize) < st.lists.len() {
+                    st.lists.remove(i as usize);
+                }
+            });
+            show_files(&app);
             load_source(&app);
         }
     });
@@ -2162,21 +2316,24 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             load_bin(&app);
         }
     });
-    // 0 = all sequences (on → off, else all on), 1.. one of them
+    // 0 = All sequences; 1.. a sequence: while all are shown it becomes the only one, else it is ticked or unticked
+    // (unticking the last one goes back to All sequences)
     app.on_toggle_sequence({
         let weak = app.as_weak();
         move |i| {
             let Some(app) = weak.upgrade() else { return };
             with_state(&app, |st| {
                 let mut st = st.borrow_mut();
+                let every = st.seq_on.iter().all(|&on| on);
                 match (i as usize).checked_sub(1) {
-                    None => {
-                        let all = !st.seq_on.iter().all(|&on| on);
-                        st.seq_on.iter_mut().for_each(|on| *on = all);
-                    }
+                    None => st.seq_on.iter_mut().for_each(|on| *on = true),
+                    Some(k) if every => st.seq_on.iter_mut().enumerate().for_each(|(j, on)| *on = j == k),
                     Some(k) => {
                         if let Some(on) = st.seq_on.get_mut(k) {
                             *on = !*on;
+                        }
+                        if st.seq_on.iter().all(|&on| !on) {
+                            st.seq_on.iter_mut().for_each(|on| *on = true);
                         }
                     }
                 }
@@ -2445,16 +2602,25 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
     });
 }
 
-/// The sequence list: "All sequences", then every sequence of the bin, each with its switch.
+/// The sequence menu: "All sequences" ticked, or the chosen sequences ticked; the button names the choice.
 fn show_sequences(app: &AppWindow) {
     let all = tr(["All sequences", "Alle Sequenzen", "Toutes les séquences", "Todas las secuencias"]);
-    let rows: Vec<VolumeRow> = with_state(app, |st| {
+    let (rows, label) = with_state(app, |st| {
         let st = st.borrow();
-        std::iter::once(VolumeRow { name: all.into(), on: !st.seq_on.is_empty() && st.seq_on.iter().all(|&on| on) })
-            .chain(st.sequence_names.iter().zip(&st.seq_on).map(|(n, on)| VolumeRow { name: n.into(), on: *on }))
-            .collect()
+        let every = st.seq_on.iter().all(|&on| on);
+        let rows: Vec<MenuChoice> = std::iter::once(MenuChoice { title: all.as_str().into(), checked: every })
+            .chain(st.sequence_names.iter().zip(&st.seq_on).map(|(n, on)| MenuChoice { title: n.into(), checked: *on && !every }))
+            .collect();
+        let chosen: Vec<&String> = st.sequence_names.iter().zip(&st.seq_on).filter(|(_, on)| **on).map(|(n, _)| n).collect();
+        let label = match chosen.len() {
+            _ if every => all.clone(),
+            1 => chosen[0].clone(),
+            n => tr(["{} sequences", "{} Sequenzen", "{} séquences", "{} secuencias"]).replace("{}", &n.to_string()),
+        };
+        (rows, label)
     });
     app.set_sequences(ModelRc::new(VecModel::from(if rows.len() > 1 { rows } else { vec![] })));
+    app.set_sequence_label(label.into());
 }
 
 /// After a language change: the lines Rust wrote are written again in the new language.
@@ -2467,12 +2633,7 @@ fn load_texts_again(app: &AppWindow) {
             && !st.shots.is_empty()
             && app.get_source_info() != ""
         {
-            let mut text = describe(t, &st.shots, st.sequences);
-            if let Some((_, info)) = st.master.as_ref().filter(|_| app.get_mode() == 0) {
-                text = tr(["{} · master starts at {}", "{} · Master beginnt bei {}", "{} · le master commence à {}", "{} · el máster empieza en {}"])
-                    .replacen("{}", &text, 1)
-                    .replacen("{}", &format_tc(info.start_tc, info.rate), 1);
-            }
+            let text = if app.get_mode() == 0 { master_text(&st) } else { describe(t, &st.shots, st.sequences) };
             app.set_source_info(text.into());
         }
     });

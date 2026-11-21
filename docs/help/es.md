@@ -14,7 +14,7 @@ El fotograma es el del centro de cada plano. En un plano de 50 fotogramas es el 
 
 ## Máster y lista de montaje
 
-Elige Origen › Máster + lista de montaje. El máster es el montaje exportado (QuickTime, MXF y todo lo que lee ffmpeg). La lista de montaje puede ser una EDL (CMX3600), un XML de Final Cut Pro 7 (Premiere Pro, DaVinci Resolve), un FCPXML (Final Cut Pro, Resolve) o un AAF.
+Elige Origen › Máster + lista de montaje. Añade uno o varios archivos máster y listas de montaje (Añadir…; la × quita uno). Una lista de montaje va con el máster del mismo nombre: Reel1.mov y Reel1.xml; CineMosaic indica los archivos sin pareja y coloca los planos de todas las parejas uno tras otro. El máster es el montaje exportado (QuickTime, MXF y todo lo que lee ffmpeg). La lista de montaje puede ser una EDL (CMX3600), un XML de Final Cut Pro 7 (Premiere Pro, DaVinci Resolve), un FCPXML (Final Cut Pro, Resolve) o un AAF.
 
 CineMosaic sitúa cada plano en el máster por su timecode: timecode del plano menos timecode inicial del máster. Si el máster empieza en 10:00:00:00, la lista de montaje también debe empezar ahí. Si hay planos antes del inicio del máster, CineMosaic lo indica bajo el origen.
 
@@ -22,7 +22,7 @@ Una EDL solo tiene una pista de vídeo y no tiene cadencia; CineMosaic toma la d
 
 ## Bin de Media Composer
 
-Elige Origen › Bin de Media Composer, después el bin (.avb). En Secuencias, cada secuencia del bin tiene su interruptor: Todas las secuencias (por defecto) las toma todas una tras otra, por orden de nombre (Reel 2 antes de Reel 10); activa solo las que quieras: una, o tres de cinco. Debajo aparecen todos los volúmenes con una carpeta «Avid MediaFiles»; desactiva los que CineMosaic no debe buscar. Los volúmenes que conectes después aparecen solos.
+Elige Origen › Bin de Media Composer, después el bin (.avb). En el menú Secuencia, Todas las secuencias (por defecto) toma cada secuencia del bin una tras otra, por orden de nombre (Reel 2 antes de Reel 10); o elige secuencias sueltas: cada una elegida lleva una marca, así una o tres de cinco. Debajo aparecen todos los volúmenes con una carpeta «Avid MediaFiles»; desactiva los que CineMosaic no debe buscar. Los volúmenes que conectes después aparecen solos.
 
 CineMosaic sigue cada plano a través de efectos, efectos de velocidad, multicámara y anidados hasta su archivo de medios. También encuentra clips de otros bins del proyecto. Los archivos vinculados con AMA (QuickTime y otros fuera de Avid MediaFiles) se leen donde Media Composer los vincula.
 
@@ -32,7 +32,7 @@ Haz clic en Extraer fotogramas. La barra muestra el avance y el tiempo restante;
 
 ## Formato de imagen
 
-Si tu imagen tiene barras negras, elige su formato en Hoja › Formato de imagen: formatos de cine (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) o de redes sociales (9:16 para Reels, TikTok, Shorts y Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Ancho : alto debajo muestra siempre el formato; escribe ahí uno propio (por ejemplo 2.39 : 1 o 21 : 9). CineMosaic recorta las barras alrededor del centro de la imagen: arriba y abajo en formatos anchos, a izquierda y derecha en estrechos. Fotograma completo conserva toda la imagen. Puedes cambiar el formato sin volver a extraer.
+Si tu imagen tiene barras negras, elige su formato en Hoja › Formato de imagen: formatos de cine (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) o de redes sociales (9:16 para Reels, TikTok, Shorts y Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Ancho : alto debajo muestra siempre el formato en un campo; escribe ahí uno propio (por ejemplo 2.39 : 1 o 21 : 9). CineMosaic recorta las barras alrededor del centro de la imagen: arriba y abajo en formatos anchos, a izquierda y derecha en estrechos. Fotograma completo conserva toda la imagen. Puedes cambiar el formato sin volver a extraer.
 
 ## La hoja
 
@@ -44,7 +44,7 @@ Las hojas muy grandes (A0 a 600 dpi) necesitan mucha memoria para guardarse; la 
 
 La columna lateral tiene cuatro pestañas: Origen, Hoja, Línea de marco y Título. En Línea de marco, el interruptor dibuja una línea alrededor de la hoja: elige un patrón (simple, doble, grueso – fino, fino – grueso, fino – grueso – fino, dos juntas y una aparte), el grosor de una línea fina, la distancia al borde y el color (negro al principio; una muestra o un valor hexadecimal como #3c4146).
 
-En Título escribe el título. La lista de fuentes muestra cada fuente de tu Mac con su propio aspecto; ↑ y ↓ la recorren y la hoja cambia al momento, una letra salta a la siguiente fuente que empieza así. Después tamaño en puntos, negrita, cursiva y color. El ancla es el punto de la hoja del que cuelga el título, uno de nueve, como en un programa de imagen; X e Y lo mueven desde ahí en mm o píxeles. También puedes arrastrar el título en la vista previa. Donde cubre la línea de marco, la línea se interrumpe a su alrededor. Arriba o abajo, los fotogramas guardan distancia; en el centro queda por encima de ellos.
+En Título escribe el título. La lista de fuentes muestra cada fuente de tu Mac con su propio aspecto; ↑ y ↓ la recorren y la hoja cambia al momento, una letra salta a la siguiente fuente que empieza así. Después tamaño en puntos, negrita, cursiva y color. Proyectos y preajustes guardan la fuente por su nombre; en un Mac sin ella, CineMosaic nombra la fuente que falta y compone el título en Helvetica Neue. El ancla es el punto de la hoja del que cuelga el título, uno de nueve, como en un programa de imagen; X e Y lo mueven desde ahí en mm o píxeles. También puedes arrastrar el título en la vista previa. Donde cubre la línea de marco, la línea se interrumpe a su alrededor. Arriba o abajo, los fotogramas guardan distancia; en el centro queda por encima de ellos.
 
 Hoja › Marcas de corte compone la hoja en una zona con el formato de imagen dentro del papel –para fotogramas en 2:1, una zona en 2:1– y pone marcas de corte en sus esquinas para recortarla.
 

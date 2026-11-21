@@ -14,7 +14,7 @@ L’image retenue est l’image du milieu de chaque plan. Pour un plan de 50 ima
 
 ## Fichier master et liste de montage
 
-Choisissez Source › Fichier master + liste de montage. Le fichier master est le montage exporté (QuickTime, MXF et tout ce que lit ffmpeg). La liste de montage peut être une EDL (CMX3600), un XML Final Cut Pro 7 (Premiere Pro, DaVinci Resolve), un FCPXML (Final Cut Pro, Resolve) ou un AAF.
+Choisissez Source › Fichier master + liste de montage. Ajoutez un ou plusieurs fichiers master et listes de montage (Ajouter… ; le × en retire un). Une liste de montage va avec le fichier master du même nom – Reel1.mov et Reel1.xml ; CineMosaic signale les fichiers sans partenaire et place les plans de toutes les paires l’un après l’autre. Le fichier master est le montage exporté (QuickTime, MXF et tout ce que lit ffmpeg). La liste de montage peut être une EDL (CMX3600), un XML Final Cut Pro 7 (Premiere Pro, DaVinci Resolve), un FCPXML (Final Cut Pro, Resolve) ou un AAF.
 
 CineMosaic place chaque plan dans le master par son timecode : timecode du plan moins timecode de début du master. Si le master commence à 10:00:00:00, la liste de montage doit commencer là aussi. Si des plans se trouvent avant le début du master, CineMosaic l’indique sous la source.
 
@@ -22,7 +22,7 @@ Une EDL ne contient qu’une piste vidéo et pas de cadence ; CineMosaic prend l
 
 ## Chutier Media Composer
 
-Choisissez Source › Chutier Media Composer, puis le chutier (.avb). Sous Séquences, chaque séquence du chutier a son interrupteur : Toutes les séquences (par défaut) les prend toutes l’une après l’autre, par ordre de nom (Reel 2 avant Reel 10) ; n’activez que celles que vous voulez – une, ou trois sur cinq. En dessous sont listés tous les volumes avec un dossier « Avid MediaFiles » ; désactivez ceux que CineMosaic ne doit pas parcourir. Les volumes connectés plus tard apparaissent d’eux-mêmes.
+Choisissez Source › Chutier Media Composer, puis le chutier (.avb). Dans le menu Séquence, Toutes les séquences (par défaut) prend chaque séquence du chutier l’une après l’autre, par ordre de nom (Reel 2 avant Reel 10) ; ou choisissez des séquences – chacune reçoit une coche, donc une ou trois sur cinq. En dessous sont listés tous les volumes avec un dossier « Avid MediaFiles » ; désactivez ceux que CineMosaic ne doit pas parcourir. Les volumes connectés plus tard apparaissent d’eux-mêmes.
 
 CineMosaic suit chaque plan à travers les effets, effets de vitesse, multicam et imbrications jusqu’à son fichier média. Les clips d’autres chutiers du projet sont trouvés aussi. Les fichiers liés en AMA (QuickTime et autres hors d’Avid MediaFiles) sont lus là où Media Composer les lie.
 
@@ -32,7 +32,7 @@ Cliquez Extraire les images. La barre montre l’avancement et le temps restant 
 
 ## Format d’image
 
-Si votre image a des bandes noires, choisissez son format sous Planche › Format d’image – formats cinéma (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) ou formats réseaux sociaux (9:16 pour Reels, TikTok, Shorts et Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Largeur : hauteur en dessous montre toujours le format ; saisissez-y le vôtre (par exemple 2.39 : 1 ou 21 : 9). CineMosaic coupe les bandes autour du centre de l’image – en haut et en bas pour les formats larges, à gauche et à droite pour les étroits. Image entière garde toute l’image. Vous pouvez changer le format sans extraire à nouveau.
+Si votre image a des bandes noires, choisissez son format sous Planche › Format d’image – formats cinéma (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) ou formats réseaux sociaux (9:16 pour Reels, TikTok, Shorts et Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Largeur : hauteur en dessous montre toujours le format dans un champ ; saisissez-y le vôtre (par exemple 2.39 : 1 ou 21 : 9). CineMosaic coupe les bandes autour du centre de l’image – en haut et en bas pour les formats larges, à gauche et à droite pour les étroits. Image entière garde toute l’image. Vous pouvez changer le format sans extraire à nouveau.
 
 ## La planche
 
@@ -44,7 +44,7 @@ Les très grandes planches (A0 à 600 dpi) demandent beaucoup de mémoire pour l
 
 La colonne latérale a quatre onglets : Source, Planche, Cadre et Titre. Sous Cadre, l’option Cadre trace un trait autour de la planche : choisissez un motif (simple, double, épais – fin, fin – épais, fin – épais – fin, deux proches et un écarté), l’épaisseur d’un trait fin, la distance au bord et la couleur (noir au départ ; une pastille ou une valeur hexadécimale comme #3c4146).
 
-Sous Titre, saisissez le titre. La liste des polices montre chaque police de votre Mac avec son propre dessin ; ↑ et ↓ la parcourent et la planche suit aussitôt, une lettre saute à la police suivante qui commence ainsi. Puis taille en points, gras, italique et couleur. L’ancre est le point de la planche auquel le titre est accroché – l’un des neuf, comme dans un logiciel d’image ; X et Y le déplacent depuis là en mm ou en pixels. Vous pouvez aussi faire glisser le titre dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt autour de lui. En haut ou en bas, les images gardent leur distance ; au milieu, il passe par-dessus.
+Sous Titre, saisissez le titre. La liste des polices montre chaque police de votre Mac avec son propre dessin ; ↑ et ↓ la parcourent et la planche suit aussitôt, une lettre saute à la police suivante qui commence ainsi. Puis taille en points, gras, italique et couleur. Projets et préréglages gardent la police par son nom ; sur un Mac qui ne l’a pas, CineMosaic nomme la police manquante et compose le titre en Helvetica Neue. L’ancre est le point de la planche auquel le titre est accroché – l’un des neuf, comme dans un logiciel d’image ; X et Y le déplacent depuis là en mm ou en pixels. Vous pouvez aussi faire glisser le titre dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt autour de lui. En haut ou en bas, les images gardent leur distance ; au milieu, il passe par-dessus.
 
 Planche › Traits de coupe met la planche en page dans une zone au format de l’image à l’intérieur du papier – pour des images en 2:1, une zone en 2:1 – et place des traits de coupe à ses coins pour la découper.
 

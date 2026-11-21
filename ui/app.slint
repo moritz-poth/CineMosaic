@@ -202,6 +202,53 @@ component Dropdown {
     }
 }
 
+// Dropdown whose menu ticks entries (`checked`); choosing one does not close the choice for the others – the menu
+// opens again with the next click
+component CheckDropdown {
+    in property <[MenuChoice]> entries;
+    in property <string> text;
+    in property <string> label;
+    callback selected(int);
+    height: 26px;
+    min-width: crow.preferred-width;
+    max-width: crow.preferred-width;
+    horizontal-stretch: 0;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.text;
+    accessible-action-default => { cmenu.show({ x: 0, y: root.height + 4px }); }
+    Rectangle {
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.line;
+        background: ctouch.pressed ? Theme.text.with-alpha(0.12) : ctouch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+    }
+    crow := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: Theme.text; overflow: elide; max-width: 220px; }
+        VerticalLayout {
+            alignment: center;
+            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
+        }
+    }
+    cmenu := ContextMenuArea {
+        Menu {
+            for e[i] in root.entries: MenuItem {
+                title: e.title;
+                checkable: true;
+                checked: e.checked;
+                activated => { root.selected(i); }
+            }
+        }
+        ctouch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { cmenu.show({ x: 0, y: root.height + 4px }); }
+        }
+    }
+}
+
 // Dropdown with sections: entries whose `checked` is set are section titles (not choosable)
 component SectionDropdown {
     in property <[MenuChoice]> entries;
@@ -363,6 +410,26 @@ component NumberField inherits Rectangle {
                 }
             }
         }
+    }
+}
+
+// A chosen file: its name, and right-aligned a small × that removes it from the list
+component FileRow inherits HorizontalLayout {
+    in property <string> text;
+    callback removed();
+    height: 22px;
+    spacing: 8px;
+    Text { text: root.text; font-size: 12px; color: Theme.muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        background: x.pressed ? Theme.text.with-alpha(0.14) : x.has-hover ? Theme.text.with-alpha(0.07) : transparent;
+        accessible-role: button;
+        accessible-label: @tr("Remove {}", root.text);
+        accessible-action-default => { root.removed(); }
+        Text { text: "×"; font-size: 14px; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
+        x := TouchArea { mouse-cursor: pointer; clicked => { root.removed(); } }
     }
 }
 
@@ -1320,7 +1387,8 @@ component FontList inherits Rectangle {
     height: 7 * self.row-h + 2px;
     border-radius: 6px;
     border-width: 1px;
-    border-color: fs.has-focus ? Theme.accent : Theme.line;
+    // no blue focus frame and no blue row (user 2026-11-21): the chosen font is a quiet grey row
+    border-color: Theme.line;
     clip: true;
     // keep the current font in view
     function reveal() {
@@ -1353,7 +1421,7 @@ component FontList inherits Rectangle {
         list := ListView {
             for f[i] in root.fonts: Rectangle {
                 height: root.row-h;
-                background: i == root.current ? Theme.accent.with-alpha(0.28) : t.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+                background: i == root.current ? Theme.text.with-alpha(0.14) : t.has-hover ? Theme.text.with-alpha(0.06) : transparent;
                 accessible-role: list-item;
                 accessible-label: f;
                 accessible-checked: i == root.current;
@@ -1563,11 +1631,15 @@ export component AppWindow inherits SheetWindow {
     // source: 0 master file + cut list, 1 Media Composer bin
     in-out property <int> mode;
     in property <string> bin-name;
-    // "All sequences", then the bin's sequences, each with its switch
-    in property <[VolumeRow]> sequences;
+    // "All sequences", then the bin's sequences; `checked` = ticked in the menu
+    in property <[MenuChoice]> sequences;
+    in property <string> sequence-label;
     in property <[VolumeRow]> volumes;
-    in property <string> master-name;
-    in property <string> list-name;
+    // master mode: the files chosen (a master and the cut list with the same name belong together)
+    in property <[string]> master-names;
+    in property <[string]> list-names;
+    callback remove-master(int);
+    callback remove-list(int);
     in property <string> source-info;
     in property <string> source-error;
     // 0 nothing grabbed yet, 1 grabbing, 2 stills ready
@@ -1590,10 +1662,9 @@ export component AppWindow inherits SheetWindow {
     callback unit-chosen(bool);
     callback size-edited();
     // picture format: 0 full frame (no crop), 1.. the formats in layout::PICTURE, then custom; width : height
-    // always shown (the menu fills them, editing them picks the matching format – Rust)
+    // always shown in one field (the menu fills it, typing picks the matching format – Rust)
     in-out property <int> picture: 0;
-    in-out property <string> aspect-w: "16";
-    in-out property <string> aspect-h: "9";
+    in-out property <string> aspect: "16:9";
     in property <[MenuChoice]> picture-menu;
     // the chosen format as the button shows it: "9:16", not the platforms
     in property <string> picture-label;
@@ -1718,15 +1789,16 @@ export component AppWindow inherits SheetWindow {
                     if root.mode == 0: VerticalLayout {
                         spacing: 6px;
                         Row {
-                            text: @tr("Master file");
-                            CheckButton { text: @tr("Choose…"); small: true; enabled: root.state != 1; clicked => { root.pick-master(); } }
+                            text: @tr("Master files");
+                            CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-master(); } }
                         }
-                        if root.master-name != "": Para { text: root.master-name; color: Theme.muted; }
+                        for name[i] in root.master-names: FileRow { text: name; removed => { root.remove-master(i); } }
                         Row {
-                            text: @tr("Cut list");
-                            CheckButton { text: @tr("Choose…"); small: true; enabled: root.state != 1; clicked => { root.pick-list(); } }
+                            text: @tr("Cut lists");
+                            CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-list(); } }
                         }
-                        if root.list-name != "": Para { text: root.list-name; color: Theme.muted; }
+                        for name[i] in root.list-names: FileRow { text: name; removed => { root.remove-list(i); } }
+                        Para { text: @tr("A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."); }
                     }
                     if root.mode == 1: VerticalLayout {
                         spacing: 6px;
@@ -1735,21 +1807,14 @@ export component AppWindow inherits SheetWindow {
                             CheckButton { text: @tr("Choose…"); small: true; enabled: root.state != 1; clicked => { root.pick-bin(); } }
                         }
                         if root.bin-name != "": Para { text: root.bin-name; color: Theme.muted; }
-                        if root.sequences.length > 0: Text { text: @tr("Sequences"); font-size: 12px; color: Theme.text; height: 24px; vertical-alignment: center; }
-                        // shortcut: a plain scroll area without a thumb, like the volumes; five rows show at once
-                        if root.sequences.length > 0: Flickable {
-                            height: min(root.sequences.length * 28px, 140px);
-                            content-height: root.sequences.length * 28px;
-                            VerticalLayout {
-                                for q[i] in root.sequences: HorizontalLayout {
-                                    height: 28px;
-                                    spacing: 10px;
-                                    Text { text: q.name; font-size: 12px; color: i == 0 ? Theme.text : Theme.muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                    VerticalLayout {
-                                        alignment: center;
-                                        Switch { on: q.on; label: q.name; toggled => { root.toggle-sequence(i); } }
-                                    }
-                                }
+                        if root.sequences.length > 0: Row {
+                            text: @tr("Sequence");
+                            // All sequences, or one or several with a tick
+                            CheckDropdown {
+                                label: @tr("Sequence");
+                                entries: root.sequences;
+                                text: root.sequence-label;
+                                selected(i) => { root.toggle-sequence(i); }
                             }
                         }
                         Text { text: @tr("Volumes with Avid MediaFiles"); font-size: 12px; color: Theme.text; height: 24px; vertical-alignment: center; }
@@ -1819,9 +1884,8 @@ export component AppWindow inherits SheetWindow {
                     }
                     Row {
                         text: @tr("Width : height");
-                        NumberField { width: 80px; text <=> root.aspect-w; scrub: 0.01; step: 0.01; minimum: 0.1; unit: ""; label: @tr("Width"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
-                        Text { text: ":"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                        NumberField { width: 80px; text <=> root.aspect-h; scrub: 0.01; step: 0.01; minimum: 0.1; unit: ""; label: @tr("Height"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
+                        // one field like the old Custom: "2.39:1", "9:16", "21:9" or just "2.39" (typing only)
+                        NumberField { text <=> root.aspect; scrub: 0; unit: ""; label: @tr("Width : height"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
                     }
                     if root.picture != 0: Para { text: @tr("Black bars outside this format are cut off (top and bottom or left and right)."); }
                     Row {
@@ -2111,7 +2175,7 @@ export component AppWindow inherits SheetWindow {
             }
             // new zoom, the point (px, py) of the desk stays where it is
             function zoom-to(z: float, px: length, py: length) {
-                let nz = clamp(z, 1, 8);
+                let nz = clamp(z, 0.25, 8); // 25–800 %
                 let dx = px - desk.width / 2;
                 let dy = py - desk.height / 2;
                 root.pan-x = dx - (dx - root.pan-x) * nz / root.zoom;
@@ -2196,7 +2260,7 @@ export component AppWindow inherits SheetWindow {
                         }
                     }
                     double-clicked => {
-                        if root.zoom > 1 { desk.zoom-to(1, self.mouse-x, self.mouse-y); } else { desk.zoom-to(2, self.mouse-x, self.mouse-y); }
+                        if Math.abs(root.zoom - 1) > 0.01 { desk.zoom-to(1, self.mouse-x, self.mouse-y); } else { desk.zoom-to(2, self.mouse-x, self.mouse-y); }
                     }
                     scroll-event(e) => {
                         if e.modifiers.control {
@@ -2227,7 +2291,7 @@ export component AppWindow inherits SheetWindow {
                     padding-left: 4px;
                     padding-right: 4px;
                     spacing: 2px;
-                    ZoomButton { text: "−"; label: @tr("Zoom out"); enabled: root.zoom > 1; clicked => { desk.zoom-to(root.zoom / 1.5, desk.width / 2, desk.height / 2); } }
+                    ZoomButton { text: "−"; label: @tr("Zoom out"); enabled: root.zoom > 0.26; clicked => { desk.zoom-to(root.zoom / 1.5, desk.width / 2, desk.height / 2); } }
                     Text {
                         text: Math.round(root.zoom * 100) + " %";
                         min-width: 52px;
@@ -2237,7 +2301,7 @@ export component AppWindow inherits SheetWindow {
                         vertical-alignment: center;
                     }
                     ZoomButton { text: "+"; label: @tr("Zoom in"); enabled: root.zoom < 8; clicked => { desk.zoom-to(root.zoom * 1.5, desk.width / 2, desk.height / 2); } }
-                    ZoomButton { text: @tr("Fit"); label: @tr("Fit the whole sheet"); enabled: root.zoom > 1; clicked => { desk.zoom-to(1, desk.width / 2, desk.height / 2); } }
+                    ZoomButton { text: @tr("Fit"); label: @tr("Fit the whole sheet"); enabled: Math.abs(root.zoom - 1) > 0.01; clicked => { desk.zoom-to(1, desk.width / 2, desk.height / 2); } }
                 }
             }
             if root.state == 0 && root.source-info == "": Text {

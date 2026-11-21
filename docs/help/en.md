@@ -14,7 +14,7 @@ The still is the middle frame of each shot. For a shot of 50 frames that is fram
 
 ## Master file and cut list
 
-Choose Source › Master file + cut list. The master file is the exported cut (QuickTime, MXF and anything else ffmpeg reads). The cut list can be an EDL (CMX3600), a Final Cut Pro 7 XML (Premiere Pro, DaVinci Resolve), an FCPXML (Final Cut Pro, Resolve) or an AAF.
+Choose Source › Master file + cut list. Add one or several master files and cut lists (Add…; the × removes one). A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml; CineMosaic names files without a partner, and lays the shots of all pairs one after the other. The master file is the exported cut (QuickTime, MXF and anything else ffmpeg reads). The cut list can be an EDL (CMX3600), a Final Cut Pro 7 XML (Premiere Pro, DaVinci Resolve), an FCPXML (Final Cut Pro, Resolve) or an AAF.
 
 CineMosaic places every shot in the master by its timecode: the timecode of the shot minus the master's start timecode. If the master starts at 10:00:00:00, the cut list must start there too. If shots lie before the master's start, CineMosaic says so under the source.
 
@@ -22,7 +22,7 @@ An EDL holds only one video track and no frame rate; CineMosaic takes the frame 
 
 ## Media Composer bin
 
-Choose Source › Media Composer bin, then the bin (.avb). Under Sequences, every sequence of the bin has a switch: All sequences (the default) takes them all one after the other, in name order (Reel 2 before Reel 10); switch on only the ones you want – one, or three of five. Below, every volume with an Avid MediaFiles folder is listed; switch off the ones CineMosaic should not search. Volumes you connect later appear by themselves.
+Choose Source › Media Composer bin, then the bin (.avb). In the Sequence menu, All sequences (the default) takes every sequence of the bin one after the other, in name order (Reel 2 before Reel 10); or choose single sequences – each one you choose gets a tick, so one or three of five. Below, every volume with an Avid MediaFiles folder is listed; switch off the ones CineMosaic should not search. Volumes you connect later appear by themselves.
 
 CineMosaic follows every shot through effects, motion effects, multicam and nests down to its media file. Clips from other bins of the project are found as well. AMA-linked files (QuickTime and others outside Avid MediaFiles) are read from where Media Composer links them.
 
@@ -32,7 +32,7 @@ Click Grab stills. The bar shows how far it is and how long it will take; Pause 
 
 ## Picture format
 
-If your picture has black bars, choose its format under Sheet › Picture format – film formats (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) or social media formats (9:16 for Reels, TikTok, Shorts and Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Width : height below always shows the format; type your own there (for example 2.39 : 1 or 21 : 9). CineMosaic cuts the bars off around the middle of the picture – top and bottom for wide formats, left and right for narrow ones. Full frame keeps the whole picture. You can change the format without grabbing the stills again.
+If your picture has black bars, choose its format under Sheet › Picture format – film formats (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) or social media formats (9:16 for Reels, TikTok, Shorts and Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Width : height below always shows the format in one field; type your own there (for example 2.39 : 1 or 21 : 9). CineMosaic cuts the bars off around the middle of the picture – top and bottom for wide formats, left and right for narrow ones. Full frame keeps the whole picture. You can change the format without grabbing the stills again.
 
 ## The sheet
 
@@ -44,7 +44,7 @@ Very large sheets (A0 at 600 dpi) need a lot of memory to save; the line below t
 
 The side column has four tabs: Source, Sheet, Frame line and Headline. Under Frame line, the switch draws a line around the sheet: choose a pattern (single, double, thick – thin, thin – thick, thin – thick – thin, two close and one apart), the thickness of a thin strand, the distance from the edge and the colour (black at first; a swatch or a hex value like #3c4146).
 
-Under Headline, type the title. The font list shows every font of your Mac in its own look; ↑ and ↓ step through it and the sheet follows at once, a letter jumps to the next font starting with it. Then size in points, bold, italic and colour. The anchor is the point of the sheet the headline hangs at – one of nine, like in an image editor; X and Y move it from there in mm or pixels. You can also drag the headline in the preview. Where it covers the frame line, the line breaks around it. A headline at the top or bottom keeps the stills clear; in the middle it lies over them.
+Under Headline, type the title. The font list shows every font of your Mac in its own look; ↑ and ↓ step through it and the sheet follows at once, a letter jumps to the next font starting with it. Then size in points, bold, italic and colour. Projects and presets keep the font by name; opened on a Mac without it, CineMosaic names the missing font and sets the headline in Helvetica Neue. The anchor is the point of the sheet the headline hangs at – one of nine, like in an image editor; X and Y move it from there in mm or pixels. You can also drag the headline in the preview. Where it covers the frame line, the line breaks around it. A headline at the top or bottom keeps the stills clear; in the middle it lies over them.
 
 Sheet › Crop marks lays the sheet out in an area of the picture format inside the paper – for stills in 2:1 an area of 2:1 – and puts crop marks at its corners, so you can cut it out.
 

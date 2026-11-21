@@ -233,12 +233,6 @@ msgstr "Fichier master + liste de montage"
 msgid "Media Composer bin"
 msgstr "Chutier Media Composer"
 
-msgid "Master file"
-msgstr "Fichier master"
-
-msgid "Cut list"
-msgstr "Liste de montage"
-
 msgid "Bin"
 msgstr "Chutier"
 
@@ -278,8 +272,23 @@ msgstr "Enregistrer le projet sous…"
 msgid "Grab {} missing stills"
 msgstr "Récupérer {} images manquantes"
 
-msgid "Sequences"
-msgstr "Séquences"
+msgid "Sequence"
+msgstr "Séquence"
+
+msgid "Master files"
+msgstr "Fichiers master"
+
+msgid "Cut lists"
+msgstr "Listes de montage"
+
+msgid "Add…"
+msgstr "Ajouter…"
+
+msgid "Remove {}"
+msgstr "Retirer {}"
+
+msgid "A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."
+msgstr "Une liste de montage va avec le fichier master du même nom – Reel1.mov et Reel1.xml."
 
 msgid "Unit"
 msgstr "Unité"

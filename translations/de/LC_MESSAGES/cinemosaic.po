@@ -233,12 +233,6 @@ msgstr "Masterfile + Schnittliste"
 msgid "Media Composer bin"
 msgstr "Media-Composer-Bin"
 
-msgid "Master file"
-msgstr "Masterfile"
-
-msgid "Cut list"
-msgstr "Schnittliste"
-
 msgid "Bin"
 msgstr "Bin"
 
@@ -278,8 +272,23 @@ msgstr "Projekt sichern unter…"
 msgid "Grab {} missing stills"
 msgstr "{} fehlende Stills holen"
 
-msgid "Sequences"
-msgstr "Sequenzen"
+msgid "Sequence"
+msgstr "Sequenz"
+
+msgid "Master files"
+msgstr "Masterfiles"
+
+msgid "Cut lists"
+msgstr "Schnittlisten"
+
+msgid "Add…"
+msgstr "Hinzufügen…"
+
+msgid "Remove {}"
+msgstr "{} entfernen"
+
+msgid "A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."
+msgstr "Eine Schnittliste gehört zum Masterfile mit dem gleichen Namen – Reel1.mov und Reel1.xml."
 
 msgid "Unit"
 msgstr "Einheit"

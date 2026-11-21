@@ -14,7 +14,7 @@ Das Still ist der mittlere Frame jedes Shots. Bei einem Shot von 50 Frames ist d
 
 ## Masterfile und Schnittliste
 
-Wähle Quelle › Masterfile + Schnittliste. Das Masterfile ist der exportierte Schnitt (QuickTime, MXF und alles, was ffmpeg liest). Die Schnittliste kann eine EDL (CMX3600), ein Final-Cut-Pro-7-XML (Premiere Pro, DaVinci Resolve), ein FCPXML (Final Cut Pro, Resolve) oder ein AAF sein.
+Wähle Quelle › Masterfile + Schnittliste. Füge ein oder mehrere Masterfiles und Schnittlisten hinzu (Hinzufügen…; das × entfernt eins). Eine Schnittliste gehört zum Masterfile mit dem gleichen Namen – Reel1.mov und Reel1.xml; Dateien ohne Partner nennt CineMosaic, und die Shots aller Paare kommen nacheinander auf den Bogen. Das Masterfile ist der exportierte Schnitt (QuickTime, MXF und alles, was ffmpeg liest). Die Schnittliste kann eine EDL (CMX3600), ein Final-Cut-Pro-7-XML (Premiere Pro, DaVinci Resolve), ein FCPXML (Final Cut Pro, Resolve) oder ein AAF sein.
 
 CineMosaic findet jeden Shot im Master über seinen Timecode: Timecode des Shots minus Start-Timecode des Masters. Beginnt der Master bei 10:00:00:00, muss auch die Schnittliste dort beginnen. Liegen Shots vor dem Start des Masters, steht das unter der Quelle.
 
@@ -22,7 +22,7 @@ Eine EDL enthält nur eine Videospur und keine Framerate; CineMosaic nimmt die F
 
 ## Media-Composer-Bin
 
-Wähle Quelle › Media-Composer-Bin, dann den Bin (.avb). Unter Sequenzen hat jede Sequenz des Bins einen Schalter: Alle Sequenzen (Standard) nimmt alle nacheinander, nach Namen sortiert (Reel 2 vor Reel 10); schalte nur die ein, die du willst – eine oder drei von fünf. Darunter stehen alle Volumes mit einem Ordner „Avid MediaFiles“; schalte die aus, die CineMosaic nicht durchsuchen soll. Volumes, die du später anschließt, erscheinen von selbst.
+Wähle Quelle › Media-Composer-Bin, dann den Bin (.avb). Im Menü Sequenz nimmt Alle Sequenzen (Standard) jede Sequenz des Bins nacheinander, nach Namen sortiert (Reel 2 vor Reel 10); oder wähle einzelne Sequenzen – jede gewählte bekommt einen Haken, also eine oder drei von fünf. Darunter stehen alle Volumes mit einem Ordner „Avid MediaFiles“; schalte die aus, die CineMosaic nicht durchsuchen soll. Volumes, die du später anschließt, erscheinen von selbst.
 
 CineMosaic verfolgt jeden Shot durch Effekte, Motion-Effekte, Multicam und Nests bis zu seiner Mediendatei. Clips aus anderen Bins des Projekts werden auch gefunden. AMA-verlinkte Dateien (QuickTime und andere außerhalb von Avid MediaFiles) werden dort gelesen, wo Media Composer sie verlinkt.
 
@@ -32,7 +32,7 @@ Klicke Stills holen. Der Balken zeigt, wie weit es ist und wie lange es noch dau
 
 ## Bildformat
 
-Hat dein Bild schwarze Balken, wähle sein Format unter Bogen › Bildformat – Filmformate (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) oder Social-Media-Formate (9:16 für Reels, TikTok, Shorts und Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Breite : Höhe darunter zeigt das Format immer; dort tippst du auch ein eigenes (zum Beispiel 2.39 : 1 oder 21 : 9). CineMosaic schneidet die Balken um die Bildmitte ab – oben und unten bei breiten Formaten, links und rechts bei schmalen. Vollbild behält das ganze Bild. Du kannst das Format ändern, ohne die Stills neu zu holen.
+Hat dein Bild schwarze Balken, wähle sein Format unter Bogen › Bildformat – Filmformate (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) oder Social-Media-Formate (9:16 für Reels, TikTok, Shorts und Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Breite : Höhe darunter zeigt das Format immer in einem Feld; dort tippst du auch ein eigenes (zum Beispiel 2.39 : 1 oder 21 : 9). CineMosaic schneidet die Balken um die Bildmitte ab – oben und unten bei breiten Formaten, links und rechts bei schmalen. Vollbild behält das ganze Bild. Du kannst das Format ändern, ohne die Stills neu zu holen.
 
 ## Der Bogen
 
@@ -44,7 +44,7 @@ Sehr große Bögen (A0 mit 600 dpi) brauchen zum Speichern viel Arbeitsspeicher;
 
 Die Seitenspalte hat vier Reiter: Quelle, Bogen, Rahmenlinie und Headline. Unter Rahmenlinie zieht der Schalter eine Linie um den Bogen: wähle ein Muster (einfach, doppelt, dick – dünn, dünn – dick, dünn – dick – dünn, zwei nah und eine weiter), die Dicke einer dünnen Linie, den Abstand zum Rand und die Farbe (zuerst Schwarz; ein Farbfeld oder ein Hex-Wert wie #3c4146).
 
-Unter Headline tippst du den Titel. Die Schriftliste zeigt jede Schrift deines Macs in ihrem eigenen Aussehen; ↑ und ↓ blättern durch, der Bogen folgt sofort, ein Buchstabe springt zur nächsten Schrift mit diesem Anfang. Dann Größe in Punkt, fett, kursiv und Farbe. Der Anker ist der Punkt des Bogens, an dem die Headline hängt – einer von neun, wie in einem Bildprogramm; X und Y verschieben sie von dort in mm oder Pixeln. Du kannst die Headline auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie um sie herum unterbrochen. Oben oder unten halten die Stills Abstand; in der Mitte liegt sie über ihnen.
+Unter Headline tippst du den Titel. Die Schriftliste zeigt jede Schrift deines Macs in ihrem eigenen Aussehen; ↑ und ↓ blättern durch, der Bogen folgt sofort, ein Buchstabe springt zur nächsten Schrift mit diesem Anfang. Dann Größe in Punkt, fett, kursiv und Farbe. Projekte und Presets merken sich die Schrift beim Namen; auf einem Mac ohne sie nennt CineMosaic die fehlende Schrift und setzt die Headline in Helvetica Neue. Der Anker ist der Punkt des Bogens, an dem die Headline hängt – einer von neun, wie in einem Bildprogramm; X und Y verschieben sie von dort in mm oder Pixeln. Du kannst die Headline auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie um sie herum unterbrochen. Oben oder unten halten die Stills Abstand; in der Mitte liegt sie über ihnen.
 
 Bogen › Schnittmarken legt den Bogen in einer Fläche im Bildformat innerhalb des Papiers an – bei Stills in 2:1 eine Fläche in 2:1 – und setzt Schnittmarken an ihre Ecken, damit du sie ausschneiden kannst.
 
