@@ -1,8 +1,8 @@
 // Draws the app icon for every size on Apple's icon grid, in Mountpoint's style (small sizes have less margin).
 //   swift scripts/make-icon.swift            → assets/AppIcon.iconset (all sizes, used by scripts/build-mac-app.sh) + assets/icon.png
 //   swift scripts/make-icon.swift <dir>      → only the iconset sizes into <dir>
-// Copied from MediaFiles Check. Motif "contact sheet": a light sheet of paper with a grid of wide frames, a few of them
-// tinted like stills. Geometry in a 256-unit grid like Mountpoint's make-icon.swift (same plate, colours, motif scale).
+// Plate copied from MediaFiles Check / Mountpoint. Motif "Raster": 3 × 3 stills, the middle one lit (concept 01,
+// chosen by the user 2026-11-21 from 20 drafts). Geometry on the 824 px plate.
 import AppKit
 
 /// Plate size per pixel size, measured from macOS system app icons (same table as Mountpoint).
@@ -10,15 +10,6 @@ let plateFor: [Int: Int] = [16: 14, 32: 28, 64: 52, 128: 104, 256: 206, 512: 412
 
 func color(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
     CGColor(red: CGFloat(hex >> 16 & 0xff) / 255, green: CGFloat(hex >> 8 & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: a)
-}
-
-/// Half ellipse from the left to the right end; `top` = back edge (through the top), else front edge (through the bottom).
-func halfEllipse(_ p: CGMutablePath, cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, top: Bool, leftToRight: Bool = true) {
-    let t = CGAffineTransform(translationX: cx, y: cy).scaledBy(x: 1, y: ry / rx)
-    // y points down here: angle π = left, 3π/2 = top, π/2 = bottom
-    let (a, b): (CGFloat, CGFloat) = top ? (.pi, 2 * .pi) : (.pi, 0)
-    let (s, e) = leftToRight ? (a, b) : (b, a)
-    p.addArc(center: .zero, radius: rx, startAngle: s, endAngle: e, clockwise: top ? !leftToRight : leftToRight, transform: t)
 }
 
 func render(_ size: Int) -> Data {
@@ -61,32 +52,17 @@ func render(_ size: Int) -> Data {
     cg.setLineWidth(edge)
     cg.strokePath()
 
-    // motif: same scale and optical offset as Mountpoint; tiny sizes get a larger motif
-    let boost: CGFloat = size <= 16 ? 1.3 : size <= 32 ? 1.18 : size <= 64 ? 1.08 : 1
-    let unit = k * 4 * 0.62 * boost
-    cg.translateBy(x: margin + 412 * k, y: margin + 412 * k + 16 * k)
-    cg.scaleBy(x: unit, y: unit)
-    cg.translateBy(x: -128, y: -138)
-
-    // sheet of paper, portrait
-    let paper = CGRect(x: 58, y: 46, width: 140, height: 184)
-    cg.addPath(CGPath(roundedRect: paper, cornerWidth: 10, cornerHeight: 10, transform: nil))
-    cg.setFillColor(color(0xe9eaeb))
-    cg.fillPath()
-    // frames: 3 × 5 at large sizes, 2 × 3 when small (otherwise they blur into grey)
-    let (cols, rows): (Int, Int) = small ? (2, 3) : (3, 5)
-    let inner: CGFloat = small ? 16 : 14, gap: CGFloat = small ? 12 : 8
-    let fw = (paper.width - 2 * inner - CGFloat(cols - 1) * gap) / CGFloat(cols)
-    let fh = fw * 9 / 16
-    let blockH = CGFloat(rows) * fh + CGFloat(rows - 1) * gap
-    let y0 = paper.minY + (paper.height - blockH) / 2
-    // a few frames tinted like pictures, the rest the plate's dark grey
-    let tints: [Int: UInt32] = small ? [1: 0x2f6f8f, 4: 0xc27c0e] : [1: 0x2f6f8f, 5: 0xc27c0e, 9: 0x3f7f5a, 13: 0x2f6f8f]
-    for i in 0..<(cols * rows) {
-        let (c, r) = (i % cols, i / cols)
-        let f = CGRect(x: paper.minX + inner + CGFloat(c) * (fw + gap), y: y0 + CGFloat(r) * (fh + gap), width: fw, height: fh)
-        cg.addPath(CGPath(roundedRect: f, cornerWidth: 2, cornerHeight: 2, transform: nil))
-        cg.setFillColor(color(tints[i] ?? 0x3c4146))
+    // motif "Raster" (user's pick 2026-11-21): 3 × 3 stills, the middle one lit amber = the middle frame of every shot.
+    // Tile 168 + gap 24 on the 824 plate; at 16/32 px whole pixels (3+1, 6+2) so the gaps stay open.
+    let tints: [UInt32] = [0x3b6275, 0xc9743f, 0x5e7f6b, 0x8a4e5c, 0xf2b33d, 0x6c8ea0, 0xa85e3a, 0x2f4858, 0xd9c9a8]
+    let (tile, gap, corner): (CGFloat, CGFloat, CGFloat) =
+        size <= 16 ? (3, 1, 0.5) : size <= 32 ? (6, 2, 1) : (168 * k, 24 * k, 20 * k)
+    let block = 3 * tile + 2 * gap
+    let x0 = small ? ((CGFloat(size) - block) / 2).rounded(.down) : (CGFloat(size) - block) / 2
+    for i in 0..<9 {
+        let f = CGRect(x: x0 + CGFloat(i % 3) * (tile + gap), y: x0 + CGFloat(i / 3) * (tile + gap), width: tile, height: tile)
+        cg.addPath(CGPath(roundedRect: f, cornerWidth: corner, cornerHeight: corner, transform: nil))
+        cg.setFillColor(color(tints[i]))
         cg.fillPath()
     }
 
