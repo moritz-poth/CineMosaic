@@ -1492,6 +1492,32 @@ fn grab(app: &AppWindow) {
     });
 }
 
+/// A typed timecode: digits only, filled from the right like an Avid TC field ("1234" → "00:00:12:34"), leading
+/// zeros give way to new digits; all zero = empty (no limit). More than 8 digits: `before` stays.
+fn tc_typed(typed: &str, before: &str) -> String {
+    let digits: String = typed.chars().filter(char::is_ascii_digit).collect();
+    let d = digits.trim_start_matches('0');
+    match d.len() {
+        0 => String::new(),
+        9.. => before.to_string(),
+        _ => {
+            let d = format!("{d:0>8}");
+            format!("{}:{}:{}:{}", &d[0..2], &d[2..4], &d[4..6], &d[6..8])
+        }
+    }
+}
+
+/// A key in a timecode field: a digit is added at the right, Backspace / Delete takes the last digit off, anything
+/// else changes nothing.
+fn tc_key(text: &str, key: &str) -> String {
+    let digits: String = text.chars().filter(char::is_ascii_digit).collect();
+    match key {
+        "\u{8}" | "\u{7f}" => tc_typed(&digits[..digits.len().saturating_sub(1)], text),
+        k if k.len() == 1 && k.chars().all(|c| c.is_ascii_digit()) => tc_typed(&(digits + k), text),
+        _ => text.to_string(),
+    }
+}
+
 /// Finds the cuts of every master that has neither a cut list nor detected cuts (in a thread; pause and cancel work).
 fn detect_cuts(app: &AppWindow) {
     let (todo, gate) = with_state(app, |st| {
@@ -2416,6 +2442,7 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         }
     });
     // masters without a cut list: the cuts are looked for in the picture, one master after the other (whole files)
+    app.on_tc_key(|text, key| tc_key(&text, &key).into());
     app.on_detect_cuts({
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(detect_cuts)
@@ -3162,6 +3189,23 @@ mod mac_window {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn timecode_fields_fill_from_the_right() {
+        use super::tc_typed;
+        assert_eq!(tc_typed("1", ""), "00:00:00:01");
+        assert_eq!(tc_typed("00:00:00:012", "00:00:00:01"), "00:00:00:12");
+        assert_eq!(tc_typed("01:00:00:00", ""), "01:00:00:00");
+        assert_eq!(tc_typed("01:00:00:000", "01:00:00:00"), "10:00:00:00"); // a leading zero gives way
+        assert_eq!(tc_typed("10:00:00:000", "10:00:00:00"), "10:00:00:00"); // a 9th digit is refused
+        assert_eq!(tc_typed("00:00:00:1", "00:00:00:12"), "00:00:00:01"); // backspace shifts right
+        assert_eq!(tc_typed("00:00:00:0", "00:00:00:01"), "");
+        assert_eq!(tc_typed("1a:b2", ""), "00:00:00:12");
+        let typed = ["1", "a", "0", ":", "0", "1", "3", "0", "0", "0", "5"].iter().fold(String::new(), |t, k| super::tc_key(&t, k));
+        assert_eq!(typed, "10:01:30:00"); // the 9th digit (5) is refused
+        assert_eq!(super::tc_key("10:01:30:00", "\u{8}"), "01:00:13:00");
+        assert_eq!(super::tc_key("00:00:00:07", "\u{7f}"), "");
+    }
+
     #[test]
     fn long_names_are_shortened_in_the_middle() {
         assert_eq!(super::shorten("Cut.edl", 10), "Cut.edl");

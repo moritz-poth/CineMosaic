@@ -413,6 +413,51 @@ component NumberField inherits Rectangle {
     }
 }
 
+// A timecode field: digits only, filled from the right like an Avid TC field ("1234" → 00:00:12:34), at most 8,
+// Backspace takes the last one off; empty shows 00:00:00:00 in the disabled grey. The keys go to Rust
+// (`key(text, key)` gives the new text), so there is no cursor to jump about.
+component TcField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> label;
+    pure callback key(string, string) -> string;
+    width: 104px;
+    height: 26px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: scope.has-focus ? Theme.accent : Theme.line;
+    accessible-role: text-input;
+    accessible-label: root.label;
+    accessible-value: root.text;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: root.text == "" ? "00:00:00:00" : root.text;
+            font-size: 12px;
+            color: root.text == "" ? Theme.disabled : Theme.text;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+    }
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { scope.focus(); }
+    }
+    scope := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Tab || e.text == Key.Backtab || e.modifiers.meta || e.modifiers.control {
+                return reject;
+            }
+            if e.text == Key.Return || e.text == Key.Escape {
+                self.clear-focus();
+                return accept;
+            }
+            root.text = root.key(root.text, e.text);
+            accept
+        }
+    }
+}
+
 // A chosen file: its name, and right-aligned a small × that removes it from the list
 component FileRow inherits HorizontalLayout {
     in property <string> text;
@@ -1645,6 +1690,7 @@ export component AppWindow inherits SheetWindow {
     // the film between these master timecodes (empty: from the start / to the end): titles stay out
     in-out property <string> detect-from;
     in-out property <string> detect-to;
+    pure callback tc-key(string, string) -> string;
     callback detect-cuts();
     in property <string> source-info;
     in property <string> source-error;
@@ -1818,11 +1864,11 @@ export component AppWindow inherits SheetWindow {
                             Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
                             Row {
                                 text: @tr("Film starts at");
-                                NumberField { text <=> root.detect-from; scrub: 0; unit: ""; label: @tr("Film starts at"); }
+                                TcField { text <=> root.detect-from; label: @tr("Film starts at"); key(t, k) => { root.tc-key(t, k) } }
                             }
                             Row {
                                 text: @tr("Film ends at");
-                                NumberField { text <=> root.detect-to; scrub: 0; unit: ""; label: @tr("Film ends at"); }
+                                TcField { text <=> root.detect-to; label: @tr("Film ends at"); key(t, k) => { root.tc-key(t, k) } }
                             }
                             Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."); }
                         }
