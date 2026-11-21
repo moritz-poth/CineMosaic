@@ -290,6 +290,12 @@ msgstr "{} entfernen"
 msgid "A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."
 msgstr "Eine Schnittliste gehört zum Masterfile mit dem gleichen Namen – Reel1.mov und Reel1.xml."
 
+msgid "Detect cuts"
+msgstr "Schnitte erkennen"
+
+msgid "No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."
+msgstr "Keine Schnittliste? CineMosaic kann die Schnitte im Bild der Masterfiles finden. Das kann lange dauern: Der ganze Film wird analysiert."
+
 msgid "Unit"
 msgstr "Einheit"
 

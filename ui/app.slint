@@ -1640,6 +1640,9 @@ export component AppWindow inherits SheetWindow {
     in property <[string]> list-names;
     callback remove-master(int);
     callback remove-list(int);
+    // a master without cut list: its cuts can be found in the picture
+    in property <bool> can-detect;
+    callback detect-cuts();
     in property <string> source-info;
     in property <string> source-error;
     // 0 nothing grabbed yet, 1 grabbing, 2 stills ready
@@ -1799,6 +1802,14 @@ export component AppWindow inherits SheetWindow {
                         }
                         for name[i] in root.list-names: FileRow { text: name; removed => { root.remove-list(i); } }
                         Para { text: @tr("A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."); }
+                        if root.can-detect: VerticalLayout {
+                            spacing: 6px;
+                            HorizontalLayout {
+                                alignment: start;
+                                CheckButton { text: @tr("Detect cuts"); small: true; enabled: root.state != 1; clicked => { root.detect-cuts(); } }
+                            }
+                            Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
+                        }
                     }
                     if root.mode == 1: VerticalLayout {
                         spacing: 6px;

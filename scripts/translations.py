@@ -103,6 +103,8 @@ T = {
     'Add…': ('Hinzufügen…', 'Ajouter…', 'Añadir…'),
     'Remove {}': ('{} entfernen', 'Retirer {}', 'Quitar {}'),
     'A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml.': ('Eine Schnittliste gehört zum Masterfile mit dem gleichen Namen – Reel1.mov und Reel1.xml.', 'Une liste de montage va avec le fichier master du même nom – Reel1.mov et Reel1.xml.', 'Una lista de montaje va con el archivo máster del mismo nombre: Reel1.mov y Reel1.xml.'),
+    'Detect cuts': ('Schnitte erkennen', 'Détecter les coupes', 'Detectar cortes'),
+    'No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed.': ('Keine Schnittliste? CineMosaic kann die Schnitte im Bild der Masterfiles finden. Das kann lange dauern: Der ganze Film wird analysiert.', 'Pas de liste de montage ? CineMosaic peut trouver les coupes dans l’image des fichiers master. Cela peut être long : tout le film est analysé.', '¿Sin lista de montaje? CineMosaic puede encontrar los cortes en la imagen de los archivos máster. Puede tardar: se analiza toda la película.'),
     'Unit': ('Einheit', 'Unité', 'Unidad'),
     'Pixels': ('Pixel', 'Pixels', 'Píxeles'),
     'Grab stills': ('Stills holen', 'Extraire les images', 'Extraer fotogramas'),

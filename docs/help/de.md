@@ -16,6 +16,8 @@ Das Still ist der mittlere Frame jedes Shots. Bei einem Shot von 50 Frames ist d
 
 Wähle Quelle › Masterfile + Schnittliste. Füge ein oder mehrere Masterfiles und Schnittlisten hinzu (Hinzufügen…; das × entfernt eins). Eine Schnittliste gehört zum Masterfile mit dem gleichen Namen – Reel1.mov und Reel1.xml; Dateien ohne Partner nennt CineMosaic, und die Shots aller Paare kommen nacheinander auf den Bogen. Das Masterfile ist der exportierte Schnitt (QuickTime, MXF und alles, was ffmpeg liest). Die Schnittliste kann eine EDL (CMX3600), ein Final-Cut-Pro-7-XML (Premiere Pro, DaVinci Resolve), ein FCPXML (Final Cut Pro, Resolve) oder ein AAF sein.
 
+Keine Schnittliste? Schnitte erkennen (unter den Schnittlisten) findet die Schnitte im Bild jedes Masterfiles ohne Schnittliste; es erscheint in der Liste als „Reel1.mov – 12 Shots erkannt“ (das × entfernt es). Dabei wird der ganze Film gelesen, das dauert etwa so lange wie ein schnelles Durchspielen – Pause und Abbrechen gehen wie beim Stills holen. Weiche Übergänge (Blenden, Abblenden) werden nicht immer gefunden; eine Schnittliste ist genauer.
+
 CineMosaic findet jeden Shot im Master über seinen Timecode: Timecode des Shots minus Start-Timecode des Masters. Beginnt der Master bei 10:00:00:00, muss auch die Schnittliste dort beginnen. Liegen Shots vor dem Start des Masters, steht das unter der Quelle.
 
 Eine EDL enthält nur eine Videospur und keine Framerate; CineMosaic nimmt die Framerate des Masters.

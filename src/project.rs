@@ -26,6 +26,8 @@ pub struct Project {
     /// master mode: master files and cut lists (a master and the list with the same name belong together)
     pub masters: Vec<PathBuf>,
     pub lists: Vec<PathBuf>,
+    /// masters without a cut list: the cuts found in the picture (first frame of every shot, then the frame count)
+    pub detected: Vec<(PathBuf, Vec<i64>)>,
     pub bin: Option<PathBuf>,
     /// bin mode, projects before 2026-11-21: 0 all sequences, 1.. one of them
     pub sequence: i32,
@@ -83,6 +85,8 @@ struct FileProject {
     masters: Vec<PathBuf>,
     #[serde(default)]
     lists: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    detected: Vec<(PathBuf, Vec<i64>)>,
     bin: Option<PathBuf>,
     sequence: i32,
     #[serde(default)]
@@ -144,6 +148,7 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         list: None,
         masters: p.masters.clone(),
         lists: p.lists.clone(),
+        detected: p.detected.clone(),
         bin: p.bin.clone(),
         sequence: p.sequence,
         chosen: p.chosen.clone(),
@@ -224,6 +229,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
         mode: fp.mode,
         masters: fp.masters.into_iter().chain(fp.master).filter(|p| p.is_absolute()).collect(),
         lists: fp.lists.into_iter().chain(fp.list).filter(|p| p.is_absolute()).collect(),
+        detected: fp.detected,
         bin: local(fp.bin),
         sequence: fp.sequence,
         chosen: fp.chosen,
@@ -256,6 +262,7 @@ mod tests {
             mode: 0,
             masters: vec!["/m.mov".into()],
             lists: vec!["/c.edl".into()],
+            detected: vec![("/n.mov".into(), vec![0, 40, 90])],
             bin: None,
             sequence: 0,
             chosen: Some(vec!["Reel 1".into()]),

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use slint::{ModelRc, SharedString, VecModel};
 use cinemosaic::bin::{BinCut, sequences};
-use cinemosaic::timeline::{Part, Pick, Rate, Shot, Timeline, format_tc};
+use cinemosaic::timeline::{Item, Part, Pick, Rate, Shot, Timeline, Track, format_tc};
 use cinemosaic::report::{self, Outcome, Report};
 use cinemosaic::{Gate, Job, UPDATE_APP, avb, export, frames, grab_stills, layout, log, master_jobs, media, pick, picks, project, read_cut_list, selftest, update};
 
@@ -29,6 +29,8 @@ struct State {
     /// master mode: master files and cut lists; a master and the list with the same file name belong together
     masters: Vec<(PathBuf, frames::VideoInfo)>,
     lists: Vec<PathBuf>,
+    /// masters without a cut list whose cuts were found in the picture: first frame of every shot, then the frame count
+    detected: Vec<(PathBuf, Vec<i64>)>,
     timeline: Option<Timeline>,
     shots: Vec<Shot>,
     /// full-size stills on disk (export) and small copies (preview), by shot and place in the shot; a sheet change
@@ -1189,9 +1191,32 @@ fn stem(p: &Path) -> String {
     p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
-/// Master mode: each master (by index) with the cut list of the same name, in the masters' order.
-fn pairs(st: &State) -> Vec<(usize, PathBuf)> {
-    st.masters.iter().enumerate().filter_map(|(i, (m, _))| st.lists.iter().find(|l| stem(l) == stem(m)).map(|l| (i, l.clone()))).collect()
+/// Where a master's cuts come from: its cut list (same file name) or the cuts found in its picture.
+enum CutSource {
+    List(PathBuf),
+    Detected(Vec<i64>),
+}
+
+/// Master mode: each master (by index) with its cuts, in the masters' order; a cut list wins over detected cuts.
+fn pairs(st: &State) -> Vec<(usize, CutSource)> {
+    st.masters
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (m, _))| match st.lists.iter().find(|l| stem(l) == stem(m)) {
+            Some(l) => Some((i, CutSource::List(l.clone()))),
+            None => st.detected.iter().find(|d| &d.0 == m).map(|d| (i, CutSource::Detected(d.1.clone()))),
+        })
+        .collect()
+}
+
+/// The shots found in a master's picture as a one-track timeline in record frames (the master's timecode).
+fn detected_timeline(master: &Path, cuts: &[i64], info: &frames::VideoInfo) -> Timeline {
+    let items = cuts
+        .windows(2)
+        .enumerate()
+        .map(|(k, w)| Item { name: format!("{} {}", tr(["Shot", "Shot", "Plan", "Plano"]), k + 1), start: info.start_tc + w[0], end: info.start_tc + w[1], key: 0 })
+        .collect();
+    Timeline { name: master.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), rate: info.rate, tracks: vec![Track { items }] }
 }
 
 /// The source line in master mode: shots, rate, tracks; one master: where it starts, several: how many.
@@ -1228,7 +1253,7 @@ fn load_source(app: &AppWindow) {
         let lone_masters: Vec<&Path> = st.masters.iter().enumerate().filter(|(i, _)| !pairs.iter().any(|p| p.0 == *i)).map(|(_, m)| m.0.as_path()).collect();
         let lone_lists: Vec<&Path> = st.lists.iter().filter(|l| !st.masters.iter().any(|m| stem(&m.0) == stem(l))).map(|l| l.as_path()).collect();
         // only once both kinds were chosen: before that the empty side is simply still to come
-        if !st.masters.is_empty() && !st.lists.is_empty() {
+        if !st.masters.is_empty() && (!st.lists.is_empty() || !st.detected.is_empty()) {
             if !lone_masters.is_empty() {
                 problems.push(tr(["No cut list with the same name for {}", "Keine Schnittliste mit gleichem Namen für {}", "Aucune liste de montage du même nom pour {}", "No hay lista de montaje con el mismo nombre para {}"]).replace("{}", &names(lone_masters)));
             }
@@ -1238,8 +1263,12 @@ fn load_source(app: &AppWindow) {
         }
         let mut shots = vec![];
         let mut first: Option<Timeline> = None;
-        for (i, list) in &pairs {
-            match read_cut_list(list, st.masters[*i].1.rate) {
+        for (i, source) in &pairs {
+            let read = match source {
+                CutSource::List(list) => read_cut_list(list, st.masters[*i].1.rate).map_err(|e| format!("{}: {e}", file_name(list))),
+                CutSource::Detected(cuts) => Ok(detected_timeline(&st.masters[*i].0, cuts, &st.masters[*i].1)),
+            };
+            match read {
                 Ok(t) => {
                     shots.extend(t.shots().into_iter().map(|mut s| {
                         s.key = *i;
@@ -1247,7 +1276,7 @@ fn load_source(app: &AppWindow) {
                     }));
                     first.get_or_insert(t);
                 }
-                Err(e) => problems.push(format!("{}: {e}", file_name(list))),
+                Err(e) => problems.push(e),
             }
         }
         if !pairs.is_empty() && shots.is_empty() && problems.is_empty() {
@@ -1270,8 +1299,16 @@ fn load_source(app: &AppWindow) {
 fn show_files(app: &AppWindow) {
     let (m, l): (Vec<SharedString>, Vec<SharedString>) = with_state(app, |st| {
         let st = st.borrow();
-        (st.masters.iter().map(|m| file_name(&m.0).into()).collect(), st.lists.iter().map(|l| file_name(l).into()).collect())
+        let detected = st.detected.iter().map(|d| {
+            tr(["{} – {n} shots detected", "{} – {n} Shots erkannt", "{} – {n} plans détectés", "{} – {n} planos detectados"]).replace("{}", &file_name(&d.0)).replace("{n}", &(d.1.len() - 1).to_string()).into()
+        });
+        (st.masters.iter().map(|m| file_name(&m.0).into()).collect(), st.lists.iter().map(|l| file_name(l).into()).chain(detected).collect())
     });
+    // a master with neither a cut list nor detected cuts
+    app.set_can_detect(with_state(app, |st| {
+        let st = st.borrow();
+        st.masters.iter().any(|(m, _)| !st.lists.iter().any(|l| stem(l) == stem(m)) && !st.detected.iter().any(|d| &d.0 == m))
+    }));
     app.set_master_names(ModelRc::new(VecModel::from(m)));
     app.set_list_names(ModelRc::new(VecModel::from(l)));
 }
@@ -1408,6 +1445,73 @@ fn grab(app: &AppWindow) {
                 _ => app.set_state(if with_state(&app, |st| st.borrow().stills.is_empty()) { 0 } else { 2 }),
             }
             refresh(&app);
+        });
+    });
+}
+
+/// Finds the cuts of every master that has neither a cut list nor detected cuts (in a thread; pause and cancel work).
+fn detect_cuts(app: &AppWindow) {
+    let (todo, gate) = with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        let todo: Vec<(PathBuf, frames::VideoInfo)> = st
+            .masters
+            .iter()
+            .filter(|(m, _)| !st.lists.iter().any(|l| stem(l) == stem(m)) && !st.detected.iter().any(|d| &d.0 == m))
+            .cloned()
+            .collect();
+        st.gate = Arc::default();
+        (todo, st.gate.clone())
+    });
+    if todo.is_empty() {
+        return;
+    }
+    app.set_state(1);
+    app.set_paused(false);
+    app.set_progress(0.0);
+    app.set_work_text(tr(["Looking for the cuts…", "Suche die Schnitte…", "Recherche des coupes…", "Buscando los cortes…"]).into());
+    app.set_time_left("".into());
+    app.set_source_error("".into());
+    let weak = app.as_weak();
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        let n = todo.len();
+        let mut found = vec![];
+        let mut errors = vec![];
+        for (k, (path, info)) in todo.iter().enumerate() {
+            let progress = |done: i64, total: i64| {
+                let part = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+                let share = (k as f64 + part) / n as f64;
+                let text = tr(["Looking for the cuts in {} – {p} %", "Suche die Schnitte in {} – {p} %", "Recherche des coupes dans {} – {p} %", "Buscando los cortes en {} – {p} %"])
+                    .replace("{}", &file_name(path))
+                    .replace("{p}", &((part * 100.0) as i64).to_string());
+                let left = time_left(start, (share * 10000.0) as usize, 10000);
+                let weak = weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(app) = weak.upgrade() {
+                        app.set_progress(share as f32);
+                        app.set_work_text(text.into());
+                        app.set_time_left(left.into());
+                    }
+                });
+            };
+            match frames::detect_cuts(path, info.rate, &|| gate.go(), &progress) {
+                Ok(Some(cuts)) if cuts.len() > 1 => found.push((path.clone(), cuts)),
+                Ok(Some(_)) => errors.push(format!("{}: {}", file_name(path), tr(["no picture found", "kein Bild gefunden", "aucune image trouvée", "no se encontró imagen"]))),
+                Ok(None) => break,
+                Err(e) => errors.push(format!("{}: {e}", file_name(path))),
+            }
+        }
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = weak.upgrade() else { return };
+            // what was found before a cancel is kept
+            with_state(&app, |st| st.borrow_mut().detected.extend(found));
+            app.set_state(if with_state(&app, |st| st.borrow().stills.is_empty()) { 0 } else { 2 });
+            show_files(&app);
+            load_source(&app);
+            if !errors.is_empty() {
+                let shown = app.get_source_error();
+                app.set_source_error(errors.into_iter().chain((!shown.is_empty()).then(|| shown.to_string())).collect::<Vec<_>>().join(" · ").into());
+            }
         });
     });
 }
@@ -1627,7 +1731,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
         "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
-        "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "bin": st.bin, "sequence": st.seq_on,
+        "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "detected": st.detected, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
     })
 }
@@ -1711,6 +1815,7 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             mode: app.get_mode(),
             masters: st.masters.iter().map(|m| m.0.clone()).collect(),
             lists: st.lists.clone(),
+            detected: st.detected.clone(),
             bin: st.bin.clone(),
             sequence: 0,
             chosen: (!st.seq_on.iter().all(|&on| on)).then(|| st.sequence_names.iter().zip(&st.seq_on).filter(|(_, on)| **on).map(|(n, _)| n.clone()).collect()),
@@ -1783,6 +1888,7 @@ fn open_project(app: &AppWindow, path: PathBuf) {
         clear_source(app, &mut st);
         st.masters.clear();
         st.lists = p.lists.clone();
+        st.detected = p.detected.clone();
         st.bin = p.bin.clone();
         st.volumes = p.volumes_off.iter().map(|v| (v.clone(), false)).collect();
         st.done = p.stills.iter().filter_map(|s| Some((s.job.clone()?, s.file.clone().ok()?))).collect();
@@ -2055,7 +2161,7 @@ fn close_window(app: &AppWindow) {
 fn pristine(app: &AppWindow) -> bool {
     with_state(app, |st| {
         let st = st.borrow();
-        st.project.is_none() && st.masters.is_empty() && st.lists.is_empty() && st.bin.is_none() && st.stills.is_empty()
+        st.project.is_none() && st.masters.is_empty() && st.lists.is_empty() && st.detected.is_empty() && st.bin.is_none() && st.stills.is_empty()
     })
 }
 
@@ -2247,6 +2353,11 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             load_source(&app);
         }
     });
+    // masters without a cut list: the cuts are looked for in the picture, one master after the other (whole files)
+    app.on_detect_cuts({
+        let weak = app.as_weak();
+        move || weak.upgrade().iter().for_each(detect_cuts)
+    });
     app.on_remove_master({
         let weak = app.as_weak();
         move |i| {
@@ -2254,7 +2365,8 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             with_state(&app, |st| {
                 let mut st = st.borrow_mut();
                 if (i as usize) < st.masters.len() {
-                    st.masters.remove(i as usize);
+                    let (m, _) = st.masters.remove(i as usize);
+                    st.detected.retain(|d| d.0 != m);
                 }
             });
             show_files(&app);
@@ -2267,8 +2379,12 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             let Some(app) = weak.upgrade() else { return };
             with_state(&app, |st| {
                 let mut st = st.borrow_mut();
-                if (i as usize) < st.lists.len() {
-                    st.lists.remove(i as usize);
+                let i = i as usize;
+                if i < st.lists.len() {
+                    st.lists.remove(i);
+                } else if i - st.lists.len() < st.detected.len() {
+                    let k = i - st.lists.len();
+                    st.detected.remove(k);
                 }
             });
             show_files(&app);

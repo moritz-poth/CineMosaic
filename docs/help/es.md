@@ -16,6 +16,8 @@ El fotograma es el del centro de cada plano. En un plano de 50 fotogramas es el 
 
 Elige Origen › Máster + lista de montaje. Añade uno o varios archivos máster y listas de montaje (Añadir…; la × quita uno). Una lista de montaje va con el máster del mismo nombre: Reel1.mov y Reel1.xml; CineMosaic indica los archivos sin pareja y coloca los planos de todas las parejas uno tras otro. El máster es el montaje exportado (QuickTime, MXF y todo lo que lee ffmpeg). La lista de montaje puede ser una EDL (CMX3600), un XML de Final Cut Pro 7 (Premiere Pro, DaVinci Resolve), un FCPXML (Final Cut Pro, Resolve) o un AAF.
 
+¿Sin lista de montaje? Detectar cortes (bajo las listas de montaje) encuentra los cortes en la imagen de cada máster sin lista; aparece en la lista como «Reel1.mov – 12 planos detectados» (la × lo quita). Se lee toda la película, lo que tarda más o menos como reproducirla rápido; pausa y cancelar funcionan como al extraer. Las transiciones suaves (fundidos) no siempre se encuentran; una lista de montaje es más exacta.
+
 CineMosaic sitúa cada plano en el máster por su timecode: timecode del plano menos timecode inicial del máster. Si el máster empieza en 10:00:00:00, la lista de montaje también debe empezar ahí. Si hay planos antes del inicio del máster, CineMosaic lo indica bajo el origen.
 
 Una EDL solo tiene una pista de vídeo y no tiene cadencia; CineMosaic toma la del máster.

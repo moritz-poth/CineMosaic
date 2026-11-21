@@ -65,3 +65,76 @@ pub fn grab(file: &Path, frame: i64, rate: Rate, out: &Path) -> Result<(), Strin
     }
     Ok(())
 }
+
+/// Finds the cuts of `file` in the picture (ffmpeg scdet, picture scaled down for speed): the first frame of every
+/// shot (0 = the file's first frame) and, last, the frame count. `progress(frames read, frames in total)`; None when
+/// `go` says stop. Reads the whole file: takes about as long as decoding it.
+pub fn detect_cuts(file: &Path, rate: Rate, go: &dyn Fn() -> bool, progress: &dyn Fn(i64, i64)) -> Result<Option<Vec<i64>>, String> {
+    use std::io::{BufRead, BufReader, Read};
+    let total = Command::new(tool("ffprobe"))
+        .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"])
+        .arg(file)
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok())
+        .map_or(0, |d| (d * rate.fps()).round() as i64);
+    let mut child = Command::new(tool("ffmpeg"))
+        .args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info", "-i"])
+        .arg(file)
+        .args(["-an", "-sn", "-dn", "-vf", "scale=320:-2,scdet=threshold=10", "-f", "null", "-", "-progress", "pipe:1"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("ffmpeg could not start: {e}"))?;
+    let mut err = child.stderr.take().expect("piped");
+    let log = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = err.read_to_string(&mut s);
+        s
+    });
+    let mut frames = 0;
+    for line in BufReader::new(child.stdout.take().expect("piped")).lines() {
+        let Ok(line) = line else { break };
+        if !go() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        if let Some(n) = line.strip_prefix("frame=").and_then(|n| n.trim().parse().ok()) {
+            frames = n;
+            progress(n, total.max(n));
+        }
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let log = log.join().unwrap_or_default();
+    if !status.success() {
+        return Err(format!("the picture could not be analysed: {}", log.lines().last().unwrap_or("").trim()));
+    }
+    Ok(Some(cut_frames(&log, rate, frames)))
+}
+
+/// The scdet lines of ffmpeg's log ("lavfi.scd.time: 3.04") → 0, the first frame of each further shot, the frame count.
+fn cut_frames(log: &str, rate: Rate, frames: i64) -> Vec<i64> {
+    let mut cuts: Vec<i64> = log
+        .lines()
+        .filter_map(|l| l.split("lavfi.scd.time:").nth(1)?.trim().parse::<f64>().ok())
+        .map(|t| (t * rate.fps()).round() as i64)
+        .filter(|&f| f > 0 && f < frames)
+        .collect();
+    cuts.insert(0, 0);
+    cuts.push(frames);
+    cuts.dedup();
+    cuts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scdet_log_gives_shot_starts() {
+        let log = "Stream #0:0: Video\n[Parsed_scdet_1 @ 0x6] lavfi.scd.score: 28.084, lavfi.scd.time: 3\n[Parsed_scdet_1 @ 0x6] lavfi.scd.score: 20.5, lavfi.scd.time: 5.04\n";
+        assert_eq!(cut_frames(log, Rate { num: 25, den: 1 }, 175), vec![0, 75, 126, 175]);
+        assert_eq!(cut_frames("", Rate { num: 25, den: 1 }, 50), vec![0, 50]);
+    }
+}
