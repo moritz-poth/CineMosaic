@@ -26,8 +26,10 @@ pub struct Project {
     pub master: Option<PathBuf>,
     pub list: Option<PathBuf>,
     pub bin: Option<PathBuf>,
-    /// bin mode: 0 all sequences, 1.. one of them
+    /// bin mode, projects before 2026-11-21: 0 all sequences, 1.. one of them
     pub sequence: i32,
+    /// bin mode: the sequences shown, by name (None = all)
+    pub chosen: Option<Vec<String>>,
     /// volumes switched off (bin mode); new volumes are on
     pub volumes_off: Vec<PathBuf>,
     pub look: serde_json::Value,
@@ -75,6 +77,8 @@ struct FileProject {
     list: Option<PathBuf>,
     bin: Option<PathBuf>,
     sequence: i32,
+    #[serde(default)]
+    chosen: Option<Vec<String>>,
     volumes_off: Vec<PathBuf>,
     look: serde_json::Value,
     headline: String,
@@ -132,6 +136,7 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         list: p.list.clone(),
         bin: p.bin.clone(),
         sequence: p.sequence,
+        chosen: p.chosen.clone(),
         volumes_off: p.volumes_off.clone(),
         look: p.look.clone(),
         headline: p.headline.clone(),
@@ -172,6 +177,15 @@ pub fn load(path: &Path) -> Result<Project, String> {
     if fp.format > FORMAT {
         return Err(format!("{}: made by a newer CineMosaic – please update", path.display()));
     }
+    // a project may come from someone else: source paths only as absolute file paths (they go to ffprobe/ffmpeg,
+    // where "http:…" or "-…" would be a URL or an option), stills only as real files inside the package
+    let local = |p: Option<PathBuf>| p.filter(|p| p.is_absolute());
+    let package = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
+    let inside = |r: &str| -> Option<PathBuf> {
+        let f = path.join(r);
+        let meta = std::fs::symlink_metadata(&f).ok()?;
+        (meta.is_file() && f.canonicalize().ok()?.starts_with(&package)).then_some(f)
+    };
     let shots: Vec<Shot> = fp
         .shots
         .into_iter()
@@ -190,19 +204,19 @@ pub fn load(path: &Path) -> Result<Project, String> {
             };
             // only files inside the package
             let file = match s.file.filter(|r| r.starts_with("stills/") && !r.contains("..")) {
-                Some(r) if path.join(&r).is_file() => Ok(path.join(r)),
-                Some(_) => Err("still missing in the project".to_string()),
+                Some(r) => inside(&r).ok_or_else(|| "still missing in the project".to_string()),
                 None => Err(s.error.unwrap_or_default()),
             };
-            Some(Still { shot: s.shot, part, file, job: s.media.zip(s.frame) })
+            Some(Still { shot: s.shot, part, file, job: local(s.media).zip(s.frame) })
         })
         .collect();
     Ok(Project {
         mode: fp.mode,
-        master: fp.master,
-        list: fp.list,
-        bin: fp.bin,
+        master: local(fp.master),
+        list: local(fp.list),
+        bin: local(fp.bin),
         sequence: fp.sequence,
+        chosen: fp.chosen,
         volumes_off: fp.volumes_off,
         look: fp.look,
         headline: fp.headline,
@@ -234,6 +248,7 @@ mod tests {
             list: Some("/c.edl".into()),
             bin: None,
             sequence: 0,
+            chosen: Some(vec!["Reel 1".into()]),
             volumes_off: vec![],
             look: serde_json::json!({"margin": "10"}),
             headline: "Title".into(),
@@ -257,6 +272,14 @@ mod tests {
         let again = save(&back, &path).unwrap();
         assert_eq!(std::fs::read(again[0].file.as_ref().unwrap()).unwrap(), b"png");
         assert!(!path.with_extension("cinemosaic.old").exists() && !path.with_extension("cinemosaic.part").exists());
+        // a project from elsewhere: a URL as master and a still that links out of the package are refused
+        let json = std::fs::read_to_string(path.join("project.json")).unwrap().replace("\"/m.mov\"", "\"http://example.invalid/x\"");
+        std::fs::write(path.join("project.json"), json).unwrap();
+        std::fs::remove_file(path.join("stills/00001.png")).unwrap();
+        std::os::unix::fs::symlink(&still, path.join("stills/00001.png")).unwrap();
+        let bad = load(&path).unwrap();
+        assert_eq!(bad.master, None);
+        assert!(bad.stills[0].file.is_err() && bad.stills[0].job.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
