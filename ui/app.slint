@@ -202,6 +202,53 @@ component Dropdown {
     }
 }
 
+// Dropdown with sections: entries whose `checked` is set are section titles (not choosable)
+component SectionDropdown {
+    in property <[MenuChoice]> entries;
+    in property <int> current;
+    // what the button shows (the menu entries may be longer)
+    in property <string> text;
+    in property <string> label;
+    callback selected(int);
+    height: 26px;
+    min-width: srow.preferred-width;
+    max-width: srow.preferred-width;
+    horizontal-stretch: 0;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.entries[root.current].title;
+    accessible-action-default => { smenu.show({ x: 0, y: root.height + 4px }); }
+    Rectangle {
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.line;
+        background: stouch.pressed ? Theme.text.with-alpha(0.12) : stouch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+    }
+    srow := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: Theme.text; }
+        VerticalLayout {
+            alignment: center;
+            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
+        }
+    }
+    smenu := ContextMenuArea {
+        Menu {
+            for e[i] in root.entries: MenuItem {
+                title: e.checked ? e.title.to-uppercase() : e.title;
+                enabled: !e.checked && i != root.current;
+                activated => { root.selected(i); }
+            }
+        }
+        stouch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { smenu.show({ x: 0, y: root.height + 4px }); }
+        }
+    }
+}
+
 // Presets: Dropdown look; the menu lists the presets (the current one ticked off) plus new / update / rename / delete
 component PresetMenu {
     in property <[string]> items;
@@ -1516,8 +1563,8 @@ export component AppWindow inherits SheetWindow {
     // source: 0 master file + cut list, 1 Media Composer bin
     in-out property <int> mode;
     in property <string> bin-name;
-    in property <[string]> sequences;
-    in property <int> sequence;
+    // "All sequences", then the bin's sequences, each with its switch
+    in property <[VolumeRow]> sequences;
     in property <[VolumeRow]> volumes;
     in property <string> master-name;
     in property <string> list-name;
@@ -1542,9 +1589,16 @@ export component AppWindow inherits SheetWindow {
     callback orientation-chosen(bool);
     callback unit-chosen(bool);
     callback size-edited();
-    // picture format: 0 full frame (no crop), 1..7 the formats in layout::PICTURE, 8 custom
+    // picture format: 0 full frame (no crop), 1.. the formats in layout::PICTURE, then custom; width : height
+    // always shown (the menu fills them, editing them picks the matching format – Rust)
     in-out property <int> picture: 0;
-    in-out property <string> custom-aspect: "2.39";
+    in-out property <string> aspect-w: "16";
+    in-out property <string> aspect-h: "9";
+    in property <[MenuChoice]> picture-menu;
+    // the chosen format as the button shows it: "9:16", not the platforms
+    in property <string> picture-label;
+    callback picture-chosen(int);
+    callback picture-edited();
     in-out property <bool> landscape: true;
     // side column tab: 0 source, 1 sheet, 2 design
     in-out property <int> side-tab;
@@ -1617,7 +1671,7 @@ export component AppWindow inherits SheetWindow {
     callback pick-master();
     callback mode-chosen(int);
     callback pick-bin();
-    callback sequence-chosen(int);
+    callback toggle-sequence(int);
     callback toggle-volume(int);
     callback pick-list();
     callback grab();
@@ -1681,13 +1735,21 @@ export component AppWindow inherits SheetWindow {
                             CheckButton { text: @tr("Choose…"); small: true; enabled: root.state != 1; clicked => { root.pick-bin(); } }
                         }
                         if root.bin-name != "": Para { text: root.bin-name; color: Theme.muted; }
-                        if root.sequences.length > 0: Row {
-                            text: @tr("Sequence");
-                            Dropdown {
-                                label: @tr("Sequence");
-                                items: root.sequences;
-                                current: root.sequence;
-                                selected(i) => { root.sequence-chosen(i); }
+                        if root.sequences.length > 0: Text { text: @tr("Sequences"); font-size: 12px; color: Theme.text; height: 24px; vertical-alignment: center; }
+                        // shortcut: a plain scroll area without a thumb, like the volumes; five rows show at once
+                        if root.sequences.length > 0: Flickable {
+                            height: min(root.sequences.length * 28px, 140px);
+                            content-height: root.sequences.length * 28px;
+                            VerticalLayout {
+                                for q[i] in root.sequences: HorizontalLayout {
+                                    height: 28px;
+                                    spacing: 10px;
+                                    Text { text: q.name; font-size: 12px; color: i == 0 ? Theme.text : Theme.muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Switch { on: q.on; label: q.name; toggled => { root.toggle-sequence(i); } }
+                                    }
+                                }
                             }
                         }
                         Text { text: @tr("Volumes with Avid MediaFiles"); font-size: 12px; color: Theme.text; height: 24px; vertical-alignment: center; }
@@ -1746,16 +1808,20 @@ export component AppWindow inherits SheetWindow {
                     vertical-stretch: 1;
                     Row {
                         text: @tr("Picture format");
-                        Dropdown {
+                        SectionDropdown {
                             label: @tr("Picture format");
-                            items: [@tr("Full frame"), "4:3 (1.33)", "1.66", "16:9 (1.78)", "1.85", "2.00", "2.35", "2.39", @tr("Custom")];
-                            current: root.picture;
-                            selected(i) => { root.picture = i; root.sheet-changed(); }
+                            entries: root.picture-menu;
+                            text: root.picture-label;
+                            // menu: 0 Full frame, 1 heading, 2–8 film, 9 heading, 10–16 social media, 17 Custom
+                            current: root.picture == 0 ? 0 : root.picture <= 7 ? root.picture + 1 : root.picture + 2;
+                            selected(i) => { root.picture-chosen(i == 0 ? 0 : i <= 8 ? i - 1 : i - 2); }
                         }
                     }
-                    if root.picture == 8: Row {
+                    Row {
                         text: @tr("Width : height");
-                        NumberField { text <=> root.custom-aspect; scrub: 0.01; step: 0.01; minimum: 0.3; unit: ":1"; label: @tr("Picture format"); invalid: root.invalid == "aspect"; edited => { root.sheet-changed(); } }
+                        NumberField { width: 80px; text <=> root.aspect-w; scrub: 0.01; step: 0.01; minimum: 0.1; unit: ""; label: @tr("Width"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
+                        Text { text: ":"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                        NumberField { width: 80px; text <=> root.aspect-h; scrub: 0.01; step: 0.01; minimum: 0.1; unit: ""; label: @tr("Height"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
                     }
                     if root.picture != 0: Para { text: @tr("Black bars outside this format are cut off (top and bottom or left and right)."); }
                     Row {

@@ -269,8 +269,19 @@ impl Grid {
 }
 
 /// Picture formats offered for cropping (name, width / height).
-pub const PICTURE: [(&str, f64); 7] =
-    [("4:3", 4.0 / 3.0), ("1.66", 1.66), ("16:9", 16.0 / 9.0), ("1.85", 1.85), ("2.00", 2.0), ("2.35", 2.35), ("2.39", 2.39)];
+/// Picture formats of the menu as width : height: film formats first (`FILM` of them), then social media formats.
+/// The order of the first seven is kept: presets store the index.
+pub const PICTURE: [(f64, f64); 14] = [
+    (4.0, 3.0), (1.66, 1.0), (16.0, 9.0), (1.85, 1.0), (2.0, 1.0), (2.35, 1.0), (2.39, 1.0),
+    (9.0, 16.0), (4.0, 5.0), (3.0, 4.0), (1.0, 1.0), (2.0, 3.0), (1.91, 1.0), (16.0, 9.0),
+];
+pub const FILM: usize = 7;
+
+/// "2.39", "16", "1" – a format number without needless decimals.
+pub fn ratio_text(v: f64) -> String {
+    let s = format!("{v:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
 
 /// "2.39", "2,39", "21:9", "2.39:1" → width / height; None if not a sensible picture format.
 pub fn parse_aspect(s: &str) -> Option<f64> {

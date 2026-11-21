@@ -242,9 +242,6 @@ msgstr "Lista de montaje"
 msgid "Bin"
 msgstr "Bin"
 
-msgid "Sequence"
-msgstr "Secuencia"
-
 msgid "Volumes with Avid MediaFiles"
 msgstr "Volúmenes con Avid MediaFiles"
 
@@ -281,6 +278,9 @@ msgstr "Guardar proyecto como…"
 msgid "Grab {} missing stills"
 msgstr "Capturar {} fotogramas que faltan"
 
+msgid "Sequences"
+msgstr "Secuencias"
+
 msgid "Unit"
 msgstr "Unidad"
 
@@ -292,9 +292,6 @@ msgstr "Extraer fotogramas"
 
 msgid "Picture format"
 msgstr "Formato de imagen"
-
-msgid "Full frame"
-msgstr "Fotograma completo"
 
 msgid "Custom"
 msgstr "Personalizado"

@@ -22,7 +22,7 @@ Une EDL ne contient qu’une piste vidéo et pas de cadence ; CineMosaic prend l
 
 ## Chutier Media Composer
 
-Choisissez Source › Chutier Media Composer, puis le chutier (.avb). Sous Séquence, Toutes les séquences (par défaut) prend chaque séquence du chutier l’une après l’autre, par ordre de nom (Reel 2 avant Reel 10) ; ou choisissez-en une seule. En dessous sont listés tous les volumes avec un dossier « Avid MediaFiles » ; désactivez ceux que CineMosaic ne doit pas parcourir. Les volumes connectés plus tard apparaissent d’eux-mêmes.
+Choisissez Source › Chutier Media Composer, puis le chutier (.avb). Sous Séquences, chaque séquence du chutier a son interrupteur : Toutes les séquences (par défaut) les prend toutes l’une après l’autre, par ordre de nom (Reel 2 avant Reel 10) ; n’activez que celles que vous voulez – une, ou trois sur cinq. En dessous sont listés tous les volumes avec un dossier « Avid MediaFiles » ; désactivez ceux que CineMosaic ne doit pas parcourir. Les volumes connectés plus tard apparaissent d’eux-mêmes.
 
 CineMosaic suit chaque plan à travers les effets, effets de vitesse, multicam et imbrications jusqu’à son fichier média. Les clips d’autres chutiers du projet sont trouvés aussi. Les fichiers liés en AMA (QuickTime et autres hors d’Avid MediaFiles) sont lus là où Media Composer les lie.
 
@@ -32,7 +32,7 @@ Cliquez Extraire les images. La barre montre l’avancement et le temps restant 
 
 ## Format d’image
 
-Si votre image a des bandes noires, choisissez son format sous Planche › Format d’image : 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 ou le vôtre (par exemple 2.39 ou 21:9). CineMosaic coupe les bandes autour du centre de l’image – en haut et en bas pour les formats larges, à gauche et à droite pour les étroits. Image entière garde toute l’image. Vous pouvez changer le format sans extraire à nouveau.
+Si votre image a des bandes noires, choisissez son format sous Planche › Format d’image – formats cinéma (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) ou formats réseaux sociaux (9:16 pour Reels, TikTok, Shorts et Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Largeur : hauteur en dessous montre toujours le format ; saisissez-y le vôtre (par exemple 2.39 : 1 ou 21 : 9). CineMosaic coupe les bandes autour du centre de l’image – en haut et en bas pour les formats larges, à gauche et à droite pour les étroits. Image entière garde toute l’image. Vous pouvez changer le format sans extraire à nouveau.
 
 ## La planche
 
@@ -68,7 +68,7 @@ La police est gardée par son nom : si ce Mac ne l'a pas, la police reste inchan
 
 ## Enregistrer
 
-Choisissez le format et cliquez Enregistrer…. PNG, TIFF et JPEG contiennent la résolution, un programme d’impression les imprime donc à la taille choisie. La page PDF a la taille du papier. Afficher dans le Finder montre le fichier enregistré.
+Choisissez le format et cliquez Enregistrer…. Si des images dont la planche a besoin ne sont pas encore récupérées (après un changement de format ou de planche), CineMosaic le signale d’abord : enregistrer quand même avec des cases grises, ou annuler et les récupérer. PNG, TIFF et JPEG contiennent la résolution, un programme d’impression les imprime donc à la taille choisie. La page PDF a la taille du papier. Afficher dans le Finder montre le fichier enregistré.
 
 ## Réglages et aide
 

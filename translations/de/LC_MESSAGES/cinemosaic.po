@@ -242,9 +242,6 @@ msgstr "Schnittliste"
 msgid "Bin"
 msgstr "Bin"
 
-msgid "Sequence"
-msgstr "Sequenz"
-
 msgid "Volumes with Avid MediaFiles"
 msgstr "Volumes mit Avid MediaFiles"
 
@@ -281,6 +278,9 @@ msgstr "Projekt sichern unter…"
 msgid "Grab {} missing stills"
 msgstr "{} fehlende Stills holen"
 
+msgid "Sequences"
+msgstr "Sequenzen"
+
 msgid "Unit"
 msgstr "Einheit"
 
@@ -292,9 +292,6 @@ msgstr "Stills holen"
 
 msgid "Picture format"
 msgstr "Bildformat"
-
-msgid "Full frame"
-msgstr "Vollbild"
 
 msgid "Custom"
 msgstr "Eigenes"

@@ -55,6 +55,10 @@ struct State {
     sequences: usize,
     /// names of the bin's sequences (the menu adds "All sequences" in front)
     sequence_names: Vec<String>,
+    /// which of them are shown (all on = all sequences, also those added to the bin later)
+    seq_on: Vec<bool>,
+    /// readings of the bin started; only the newest one's result is shown
+    bin_loads: usize,
     /// width / height of the grabbed stills (bin mode has no master to ask)
     still_aspect: Option<f64>,
 }
@@ -839,7 +843,7 @@ fn preset_json(app: &AppWindow) -> serde_json::Value {
         "px-units": app.get_px_units(), "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
         "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
-        "picture": app.get_picture(), "custom-aspect": app.get_custom_aspect().as_str(), "trim": app.get_trim(),
+        "picture": app.get_picture(), "aspect-w": app.get_aspect_w().as_str(), "aspect-h": app.get_aspect_h().as_str(), "trim": app.get_trim(),
         "line-on": app.get_line_on(), "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
         "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
         "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
@@ -868,8 +872,24 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("gap", &|s| app.set_gap(s));
     boolean("auto-cols", &|b| app.set_auto_cols(b));
     text("cols", &|s| app.set_cols(s));
-    int("picture", layout::PICTURE.len() as i64 + 1, &|n| app.set_picture(n));
-    text("custom-aspect", &|s| app.set_custom_aspect(s));
+    if v.get("aspect-w").is_some() {
+        int("picture", layout::PICTURE.len() as i64 + 1, &|n| app.set_picture(n));
+        text("aspect-w", &|s| app.set_aspect_w(s));
+        text("aspect-h", &|s| app.set_aspect_h(s));
+    } else {
+        // presets from before the two fields: 1–7 = the film formats as now, 8 = Custom "2.39" or "21:9"
+        int("picture", 8, &|n| app.set_picture(n));
+        if app.get_picture() == 8 {
+            let (w, h) = v.get("custom-aspect").and_then(|x| x.as_str()).and_then(|c| {
+                let c = c.replace(',', ".");
+                c.split_once(':').map(|(w, h)| (w.trim().to_string(), h.trim().to_string())).or(Some((c.trim().to_string(), "1".into())))
+            }).unwrap_or(("2.39".into(), "1".into()));
+            app.set_aspect_w(w.into());
+            app.set_aspect_h(h.into());
+            picture_edited(app);
+        }
+    }
+    show_picture(app);
     boolean("trim", &|b| app.set_trim(b));
     boolean("line-on", &|b| app.set_line_on(b));
     text("line-width", &|s| app.set_line_width(s));
@@ -919,13 +939,68 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     }
 }
 
-/// Picture format to crop to: None = full frame; Err = the custom field is not a format.
+/// Picture format to crop to: None = full frame; Err = width : height is not a format.
 fn read_picture(app: &AppWindow) -> Result<Option<f64>, &'static str> {
-    match app.get_picture() as usize {
-        0 => Ok(None),
-        i if i <= layout::PICTURE.len() => Ok(Some(layout::PICTURE[i - 1].1)),
-        _ => layout::parse_aspect(&app.get_custom_aspect()).map(Some).ok_or("aspect"),
+    if app.get_picture() == 0 {
+        return Ok(None);
     }
+    layout::parse_aspect(&format!("{}:{}", app.get_aspect_w(), app.get_aspect_h())).map(Some).ok_or("aspect")
+}
+
+/// The picture-format menu: Full frame, the film formats, the social media formats (with their platforms), Custom;
+/// the two section titles cannot be chosen. Menu index ↔ `picture`: see `picture-menu-index` in app.slint.
+fn picture_menu(app: &AppWindow) {
+    const PLATFORMS: [&str; 7] = ["Reels, TikTok, Shorts, Stories", "Instagram, Facebook", "Instagram", "", "Pinterest", "Facebook, LinkedIn", "YouTube, X"];
+    let entry = |title: String, header: bool| MenuChoice { title: title.into(), checked: header };
+    let format = |&(w, h): &(f64, f64)| format!("{}:{}", layout::ratio_text(w), layout::ratio_text(h));
+    let mut items = vec![entry(tr(["Full frame", "Vollbild", "Image entière", "Imagen completa"]), false)];
+    items.push(entry(tr(["Film formats", "Filmformate", "Formats cinéma", "Formatos de cine"]), true));
+    items.extend(layout::PICTURE[..layout::FILM].iter().map(|f| entry(format(f), false)));
+    items.push(entry(tr(["Social media formats", "Social-Media-Formate", "Formats réseaux sociaux", "Formatos de redes sociales"]), true));
+    items.extend(layout::PICTURE[layout::FILM..].iter().zip(PLATFORMS).map(|(f, p)| {
+        let p = if p.is_empty() { tr(["square", "quadratisch", "carré", "cuadrado"]) } else { p.to_string() };
+        entry(format!("{} – {p}", format(f)), false)
+    }));
+    items.push(entry(tr(["Custom", "Eigenes", "Personnalisé", "Personalizado"]), false));
+    app.set_picture_menu(ModelRc::new(VecModel::from(items)));
+}
+
+/// A format from the menu: its width : height into the two fields (Full frame shows the stills' own format).
+fn show_picture(app: &AppWindow) {
+    let i = app.get_picture() as usize;
+    let (w, h) = match i {
+        0 => {
+            let a = with_state(app, |st| st.borrow().frame_aspect());
+            // 16:9 material reads as 16:9, anything else as x:1
+            if (a - 16.0 / 9.0).abs() < 0.005 { (16.0, 9.0) } else { (a, 1.0) }
+        }
+        i if i <= layout::PICTURE.len() => layout::PICTURE[i - 1],
+        _ => return, // Custom keeps what is typed
+    };
+    app.set_aspect_w(layout::ratio_text(w).into());
+    app.set_aspect_h(layout::ratio_text(h).into());
+}
+
+/// The button text of the picture-format menu.
+fn picture_label(app: &AppWindow) {
+    let i = app.get_picture() as usize;
+    let label = match i {
+        0 => tr(["Full frame", "Vollbild", "Image entière", "Imagen completa"]),
+        i if i <= layout::PICTURE.len() => format!("{}:{}", layout::ratio_text(layout::PICTURE[i - 1].0), layout::ratio_text(layout::PICTURE[i - 1].1)),
+        _ => tr(["Custom", "Eigenes", "Personnalisé", "Personalizado"]),
+    };
+    app.set_picture_label(label.into());
+}
+
+/// Width : height typed or dragged: the menu shows the format it matches, else Custom.
+fn picture_edited(app: &AppWindow) {
+    if let Some(a) = layout::parse_aspect(&format!("{}:{}", app.get_aspect_w(), app.get_aspect_h())) {
+        let found = layout::PICTURE.iter().position(|(w, h)| (w / h - a).abs() < 0.0005);
+        app.set_picture(found.map_or(layout::PICTURE.len() + 1, |i| i + 1) as i32);
+    } else if app.get_picture() == 0 {
+        app.set_picture(layout::PICTURE.len() as i32 + 1);
+    }
+    refresh(app);
 }
 
 /// Still `img` cut to the chosen format.
@@ -948,6 +1023,10 @@ fn refresh(app: &AppWindow) {
         }
     };
     app.set_invalid("".into());
+    if app.get_picture() == 0 {
+        show_picture(app);
+    }
+    picture_label(app);
     app.set_page_aspect((sheet.width_mm / sheet.height_mm) as f32);
     with_state(app, |st| {
         let st = st.borrow();
@@ -1226,19 +1305,26 @@ fn grab(app: &AppWindow) {
     });
 }
 
-/// Bin mode: reads sequence `index` of the chosen bin in a thread (the project's other bins may be needed).
-fn load_bin(app: &AppWindow, index: usize) {
-    let (path, gate) = with_state(app, |st| {
+/// Bin mode: reads the chosen sequences of the bin in a thread (the project's other bins may be needed).
+fn load_bin(app: &AppWindow) {
+    let (path, gate, chosen, load) = with_state(app, |st| {
         let mut st = st.borrow_mut();
         clear_source(app, &mut st);
+        // a reading still running (sequences switched quickly one after the other) stops
+        st.gate.cancel.store(true, Ordering::Relaxed);
         st.gate = Arc::default();
-        (st.bin.clone(), st.gate.clone())
+        st.bin_loads += 1;
+        let chosen: Option<Vec<usize>> =
+            if st.seq_on.iter().all(|&on| on) { None } else { Some(st.seq_on.iter().enumerate().filter(|(_, on)| **on).map(|(i, _)| i).collect()) };
+        (st.bin.clone(), st.gate.clone(), chosen, st.bin_loads)
     });
-    let Some(path) = path else {
+    let Some(path) = path.filter(|_| chosen.as_ref().is_none_or(|c| !c.is_empty())) else {
+        if chosen.is_some_and(|c| c.is_empty()) {
+            app.set_source_error(tr(["Choose at least one sequence.", "Wähle mindestens eine Sequenz.", "Choisissez au moins une séquence.", "Elige al menos una secuencia."]).into());
+        }
         with_state(app, |st| adopt_carry(app, &mut st.borrow_mut()));
         return refresh(app);
     };
-    app.set_sequence(index as i32);
     app.set_state(1);
     app.set_paused(false);
     app.set_progress(0.0);
@@ -1247,12 +1333,13 @@ fn load_bin(app: &AppWindow, index: usize) {
     refresh(app);
     let weak = app.as_weak();
     std::thread::spawn(move || {
-        // dropdown entry 0 = all sequences of the bin
-        let which = index.checked_sub(1);
-        let result = avb::Bin::read(&path).and_then(|b| BinCut::open(&path, b, which, &|| gate.go()));
+        let result = avb::Bin::read(&path).and_then(|b| BinCut::open(&path, b, chosen.as_deref(), &|| gate.go()));
         let bin_name = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(app) = weak.upgrade() else { return };
+            if with_state(&app, |st| st.borrow().bin_loads) != load {
+                return; // a newer reading was started meanwhile
+            }
             app.set_state(0);
             match result {
                 Ok(cut) => {
@@ -1341,6 +1428,23 @@ fn save(app: &AppWindow) {
         let stills: Vec<Option<PathBuf>> = st.picks(&sheet, picture).iter().map(|p| st.stills.get(p).and_then(|r| r.as_ref().ok()).cloned()).collect();
         (stills, picture.unwrap_or(st.frame_aspect()), name.unwrap_or_else(|| "CineMosaic".into()))
     });
+    // stills the sheet needs but nobody grabbed yet (the sheet or format changed): say so before saving grey cells
+    let missing = app.get_missing();
+    if missing > 0 {
+        let go = tr(["Save Anyway", "Trotzdem speichern", "Enregistrer quand même", "Guardar de todos modos"]);
+        let answer = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title(tr(["Not all stills are grabbed", "Noch nicht alle Stills geholt", "Toutes les images ne sont pas récupérées", "Faltan fotogramas por capturar"]))
+            .set_description(
+                tr(["{} stills of this sheet have not been grabbed yet; they stay grey. “Grab {} missing stills” fetches them.", "{} Stills dieses Bogens sind noch nicht geholt; sie bleiben grau. „{} fehlende Stills holen“ holt sie.", "{} images de cette planche ne sont pas encore récupérées ; elles restent grises. « Récupérer {} images manquantes » les récupère.", "Aún no se han capturado {} fotogramas de esta hoja; quedan en gris. «Capturar {} fotogramas que faltan» los captura."])
+                    .replace("{}", &missing.to_string()),
+            )
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(go.clone(), tr(["Cancel", "Abbrechen", "Annuler", "Cancelar"])))
+            .show();
+        if !matches!(answer, rfd::MessageDialogResult::Custom(ref s) if *s == go) && answer != rfd::MessageDialogResult::Ok {
+            return;
+        }
+    }
     // "/" and ":" are not allowed in a file name
     let name = name.replace(['/', ':'], "-");
     let Some(path) = rfd::FileDialog::new()
@@ -1416,7 +1520,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
         "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
-        "master": st.master.as_ref().map(|m| m.0.clone()), "list": st.list, "bin": st.bin, "sequence": app.get_sequence(),
+        "master": st.master.as_ref().map(|m| m.0.clone()), "list": st.list, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
     })
 }
@@ -1501,7 +1605,8 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             master: st.master.as_ref().map(|m| m.0.clone()),
             list: st.list.clone(),
             bin: st.bin.clone(),
-            sequence: app.get_sequence(),
+            sequence: 0,
+            chosen: (!st.seq_on.iter().all(|&on| on)).then(|| st.sequence_names.iter().zip(&st.seq_on).filter(|(_, on)| **on).map(|(n, _)| n.clone()).collect()),
             volumes_off: st.volumes.iter().filter(|v| !v.1).map(|v| v.0.clone()).collect(),
             look: preset_json(app),
             headline: app.get_headline().to_string(),
@@ -1612,12 +1717,25 @@ fn open_project(app: &AppWindow, path: PathBuf) {
                 st.master = info;
             });
             if let Some(names) = &names {
-                show_sequence_menu(&app, names);
-                with_state(&app, |st| st.borrow_mut().sequence_names = names.clone());
+                // the sequences chosen by name (older projects: one index, 0 = all)
+                let on: Vec<bool> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| match &p.chosen {
+                        Some(list) => list.contains(n),
+                        None => p.sequence <= 0 || p.sequence as usize == i + 1,
+                    })
+                    .collect();
+                with_state(&app, |st| {
+                    let mut st = st.borrow_mut();
+                    st.sequence_names = names.clone();
+                    st.seq_on = on;
+                });
+                show_sequences(&app);
             }
             if p.mode == 1 {
                 sync_volumes(&app);
-                load_bin(&app, p.sequence.max(0) as usize);
+                load_bin(&app);
             } else {
                 load_source(&app);
             }
@@ -1794,6 +1912,8 @@ fn new_window(ctx: &Rc<Ctx>) -> Result<AppWindow, slint::PlatformError> {
     wire_window(&app, ctx);
     show_fonts(&app);
     preset_menu(&app);
+    picture_menu(&app);
+    show_picture(&app);
     refresh(&app);
     app.show()?;
     if let Some(f) = from {
@@ -2007,8 +2127,7 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             let Some(app) = weak.upgrade() else { return };
             if app.get_mode() == 1 {
                 sync_volumes(&app);
-                let index = app.get_sequence().max(0) as usize;
-                load_bin(&app, index);
+                load_bin(&app);
             } else {
                 load_source(&app);
             }
@@ -2027,21 +2146,44 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
                 }
             };
             app.set_bin_name(file_name(&p).into());
-            show_sequence_menu(&app, &names);
-            with_state(&app, |st| st.borrow_mut().sequence_names = names.clone());
-            with_state(&app, |st| st.borrow_mut().bin = Some(p));
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                st.seq_on = vec![true; names.len()];
+                st.sequence_names = names.clone();
+                st.bin = Some(p);
+            });
+            show_sequences(&app);
             if names.is_empty() {
                 with_state(&app, |st| clear_source(&app, &mut st.borrow_mut()));
                 app.set_source_error(tr(["The bin holds no sequence.", "Der Bin enthält keine Sequenz.", "Le chutier ne contient aucune séquence.", "El bin no contiene ninguna secuencia."]).into());
                 return refresh(&app);
             }
             sync_volumes(&app);
-            load_bin(&app, 0);
+            load_bin(&app);
         }
     });
-    app.on_sequence_chosen({
+    // 0 = all sequences (on → off, else all on), 1.. one of them
+    app.on_toggle_sequence({
         let weak = app.as_weak();
-        move |i| weak.upgrade().iter().for_each(|a| load_bin(a, i as usize))
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                match (i as usize).checked_sub(1) {
+                    None => {
+                        let all = !st.seq_on.iter().all(|&on| on);
+                        st.seq_on.iter_mut().for_each(|on| *on = all);
+                    }
+                    Some(k) => {
+                        if let Some(on) = st.seq_on.get_mut(k) {
+                            *on = !*on;
+                        }
+                    }
+                }
+            });
+            show_sequences(&app);
+            load_bin(&app);
+        }
     });
     app.on_toggle_volume({
         let weak = app.as_weak();
@@ -2075,6 +2217,19 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         }
     });
     // headline anchor: a sensible move for the new point (inside the sheet), then draw
+    app.on_picture_chosen({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_picture(i);
+            show_picture(&app);
+            refresh(&app);
+        }
+    });
+    app.on_picture_edited({
+        let weak = app.as_weak();
+        move || weak.upgrade().iter().for_each(picture_edited)
+    });
     app.on_paper_chosen({
         let weak = app.as_weak();
         move |i| {
@@ -2290,19 +2445,22 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
     });
 }
 
-/// The Sequence menu: "All sequences", then every sequence of the bin.
-fn show_sequence_menu(app: &AppWindow, names: &[String]) {
+/// The sequence list: "All sequences", then every sequence of the bin, each with its switch.
+fn show_sequences(app: &AppWindow) {
     let all = tr(["All sequences", "Alle Sequenzen", "Toutes les séquences", "Todas las secuencias"]);
-    let model: Vec<SharedString> = std::iter::once(all.as_str()).chain(names.iter().map(|n| n.as_str())).map(Into::into).collect();
-    app.set_sequences(ModelRc::new(VecModel::from(model)));
+    let rows: Vec<VolumeRow> = with_state(app, |st| {
+        let st = st.borrow();
+        std::iter::once(VolumeRow { name: all.into(), on: !st.seq_on.is_empty() && st.seq_on.iter().all(|&on| on) })
+            .chain(st.sequence_names.iter().zip(&st.seq_on).map(|(n, on)| VolumeRow { name: n.into(), on: *on }))
+            .collect()
+    });
+    app.set_sequences(ModelRc::new(VecModel::from(if rows.len() > 1 { rows } else { vec![] })));
 }
 
 /// After a language change: the lines Rust wrote are written again in the new language.
 fn load_texts_again(app: &AppWindow) {
-    let names = with_state(app, |st| st.borrow().sequence_names.clone());
-    if !names.is_empty() {
-        show_sequence_menu(app, &names);
-    }
+    picture_menu(app);
+    show_sequences(app);
     with_state(app, |st| {
         let st = st.borrow();
         if let Some(t) = &st.timeline

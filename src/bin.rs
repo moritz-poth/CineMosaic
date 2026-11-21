@@ -110,7 +110,7 @@ fn ordered(bin: &Bin) -> Vec<&crate::avb::Mob> {
     seqs
 }
 
-/// Names of the sequences a bin shows, in name order; `BinCut::open` takes an index into this list.
+/// Names of the sequences a bin shows, in name order; `BinCut::open` takes indices into this list.
 pub fn sequences(bin: &Bin) -> Vec<String> {
     ordered(bin).iter().map(|m| m.name.clone()).collect()
 }
@@ -118,15 +118,16 @@ pub fn sequences(bin: &Bin) -> Vec<String> {
 impl BinCut {
     /// Sequence number `index` (of `sequences`) of the bin at `path`, None = every sequence of the bin one after the
     /// other. Reads the project's other bins when a sequence uses clips from them; `go()` false = cancelled (Err).
-    pub fn open(path: &Path, bin: Bin, index: Option<usize>, go: &dyn Fn() -> bool) -> Result<BinCut, String> {
+    /// `chosen`: indices of the sequences to show, in their order (None = all).
+    pub fn open(path: &Path, bin: Bin, chosen: Option<&[usize]>, go: &dyn Fn() -> bool) -> Result<BinCut, String> {
         let mut cut = BinCut { timelines: vec![], bin, others: vec![], keys: vec![] };
-        cut.build(index)?;
+        cut.build(chosen)?;
         // clips from other bins: read the project's bins once and build again
         if cut.has_missing()
             && let Some(root) = project_of(path)
         {
             cut.others = project_bins(&root, path, go).ok_or("cancelled")?;
-            cut.build(index)?;
+            cut.build(chosen)?;
         }
         Ok(cut)
     }
@@ -145,10 +146,10 @@ impl BinCut {
         self.timelines.iter().flat_map(|t| &t.tracks).flat_map(|t| &t.items).any(|i| matches!(self.hit(i.key, i.start, i.start + (i.end - i.start) / 2), Hit::Missing { .. }))
     }
 
-    fn build(&mut self, index: Option<usize>) -> Result<(), String> {
+    fn build(&mut self, chosen: Option<&[usize]>) -> Result<(), String> {
         let all = ordered(&self.bin);
-        let chosen: Vec<&crate::avb::Mob> = match index {
-            Some(i) => vec![*all.get(i).ok_or("the bin has no such sequence")?],
+        let chosen: Vec<&crate::avb::Mob> = match chosen {
+            Some(list) => list.iter().map(|&i| all.get(i).copied().ok_or("the bin has no such sequence")).collect::<Result<_, _>>()?,
             None => all,
         };
         let mut keys = vec![];

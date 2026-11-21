@@ -22,7 +22,7 @@ An EDL holds only one video track and no frame rate; CineMosaic takes the frame 
 
 ## Media Composer bin
 
-Choose Source › Media Composer bin, then the bin (.avb). Under Sequence, All sequences (the default) takes every sequence of the bin one after the other, in name order (Reel 2 before Reel 10); or choose a single one. Below, every volume with an Avid MediaFiles folder is listed; switch off the ones CineMosaic should not search. Volumes you connect later appear by themselves.
+Choose Source › Media Composer bin, then the bin (.avb). Under Sequences, every sequence of the bin has a switch: All sequences (the default) takes them all one after the other, in name order (Reel 2 before Reel 10); switch on only the ones you want – one, or three of five. Below, every volume with an Avid MediaFiles folder is listed; switch off the ones CineMosaic should not search. Volumes you connect later appear by themselves.
 
 CineMosaic follows every shot through effects, motion effects, multicam and nests down to its media file. Clips from other bins of the project are found as well. AMA-linked files (QuickTime and others outside Avid MediaFiles) are read from where Media Composer links them.
 
@@ -32,7 +32,7 @@ Click Grab stills. The bar shows how far it is and how long it will take; Pause 
 
 ## Picture format
 
-If your picture has black bars, choose its format under Sheet › Picture format: 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 or your own (for example 2.39 or 21:9). CineMosaic cuts the bars off around the middle of the picture – top and bottom for wide formats, left and right for narrow ones. Full frame keeps the whole picture. You can change the format without grabbing the stills again.
+If your picture has black bars, choose its format under Sheet › Picture format – film formats (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) or social media formats (9:16 for Reels, TikTok, Shorts and Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Width : height below always shows the format; type your own there (for example 2.39 : 1 or 21 : 9). CineMosaic cuts the bars off around the middle of the picture – top and bottom for wide formats, left and right for narrow ones. Full frame keeps the whole picture. You can change the format without grabbing the stills again.
 
 ## The sheet
 
@@ -68,7 +68,7 @@ The font is kept by name: if this Mac does not have it, the font stays as it is.
 
 ## Saving
 
-Choose the format and click Save…. PNG, TIFF and JPEG carry the resolution, so a print program prints them at the chosen size. The PDF page has the paper size. Show in Finder shows the saved file.
+Choose the format and click Save…. If stills the sheet needs are not grabbed yet (after a change of format or sheet), CineMosaic says so first: save anyway with grey cells, or cancel and grab them. PNG, TIFF and JPEG carry the resolution, so a print program prints them at the chosen size. The PDF page has the paper size. Show in Finder shows the saved file.
 
 ## Settings and help
 

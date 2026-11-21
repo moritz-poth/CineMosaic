@@ -22,7 +22,7 @@ Una EDL solo tiene una pista de vídeo y no tiene cadencia; CineMosaic toma la d
 
 ## Bin de Media Composer
 
-Elige Origen › Bin de Media Composer, después el bin (.avb). En Secuencia, Todas las secuencias (por defecto) toma cada secuencia del bin una tras otra, por orden de nombre (Reel 2 antes de Reel 10); o elige una sola. Debajo aparecen todos los volúmenes con una carpeta «Avid MediaFiles»; desactiva los que CineMosaic no debe buscar. Los volúmenes que conectes después aparecen solos.
+Elige Origen › Bin de Media Composer, después el bin (.avb). En Secuencias, cada secuencia del bin tiene su interruptor: Todas las secuencias (por defecto) las toma todas una tras otra, por orden de nombre (Reel 2 antes de Reel 10); activa solo las que quieras: una, o tres de cinco. Debajo aparecen todos los volúmenes con una carpeta «Avid MediaFiles»; desactiva los que CineMosaic no debe buscar. Los volúmenes que conectes después aparecen solos.
 
 CineMosaic sigue cada plano a través de efectos, efectos de velocidad, multicámara y anidados hasta su archivo de medios. También encuentra clips de otros bins del proyecto. Los archivos vinculados con AMA (QuickTime y otros fuera de Avid MediaFiles) se leen donde Media Composer los vincula.
 
@@ -32,7 +32,7 @@ Haz clic en Extraer fotogramas. La barra muestra el avance y el tiempo restante;
 
 ## Formato de imagen
 
-Si tu imagen tiene barras negras, elige su formato en Hoja › Formato de imagen: 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 o uno propio (por ejemplo 2.39 o 21:9). CineMosaic recorta las barras alrededor del centro de la imagen: arriba y abajo en formatos anchos, a izquierda y derecha en estrechos. Fotograma completo conserva toda la imagen. Puedes cambiar el formato sin volver a extraer.
+Si tu imagen tiene barras negras, elige su formato en Hoja › Formato de imagen: formatos de cine (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) o de redes sociales (9:16 para Reels, TikTok, Shorts y Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Ancho : alto debajo muestra siempre el formato; escribe ahí uno propio (por ejemplo 2.39 : 1 o 21 : 9). CineMosaic recorta las barras alrededor del centro de la imagen: arriba y abajo en formatos anchos, a izquierda y derecha en estrechos. Fotograma completo conserva toda la imagen. Puedes cambiar el formato sin volver a extraer.
 
 ## La hoja
 
@@ -68,7 +68,7 @@ La fuente se guarda por su nombre: si este Mac no la tiene, la fuente se queda c
 
 ## Guardar
 
-Elige el formato y haz clic en Guardar…. PNG, TIFF y JPEG llevan la resolución, así que un programa de impresión los imprime al tamaño elegido. La página PDF tiene el tamaño del papel. Mostrar en el Finder muestra el archivo guardado.
+Elige el formato y haz clic en Guardar…. Si faltan fotogramas que la hoja necesita (tras cambiar el formato o la hoja), CineMosaic lo avisa antes: guardar de todos modos con celdas grises, o cancelar y capturarlos. PNG, TIFF y JPEG llevan la resolución, así que un programa de impresión los imprime al tamaño elegido. La página PDF tiene el tamaño del papel. Mostrar en el Finder muestra el archivo guardado.
 
 ## Ajustes y ayuda
 

@@ -11,7 +11,7 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    let usage = "usage: cinemosaic <master> <cut list> <out.png|tif|jpg|pdf> [options]\n       cinemosaic --bin <bin.avb> <volume[:volume…]> <out|--list> [--seq N (default: all sequences)] [options]\noptions: [--paper A4|<w>x<h>mm] [--landscape] [--dpi 300] [--margin 10] [--gap 3] [--cols N] [--picture 2.39]";
+    let usage = "usage: cinemosaic <master> <cut list> <out.png|tif|jpg|pdf> [options]\n       cinemosaic --bin <bin.avb> <volume[:volume…]> <out|--list> [--seq N[,N…] (default: all sequences)] [options]\noptions: [--paper A4|<w>x<h>mm] [--landscape] [--dpi 300] [--margin 10] [--gap 3] [--cols N] [--picture 2.39]";
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let bin_mode = args.first().is_some_and(|a| a == "--bin");
     if bin_mode {
@@ -23,7 +23,7 @@ fn run() -> Result<(), String> {
     let (master, list, out) = (PathBuf::from(&args[0]), PathBuf::from(&args[1]), PathBuf::from(&args[2]));
     let list_only = out.as_os_str() == "--list";
     let format = if list_only { export::Format::Png } else { export::Format::from_path(&out).ok_or(usage)? };
-    let (mut seq, mut picture) = (None::<usize>, None);
+    let (mut seq, mut picture) = (None::<Vec<usize>>, None);
     let mut sheet = layout::Sheet { width_mm: 210.0, height_mm: 297.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, ..Default::default() };
     let mut landscape = false;
     let mut it = args[3..].iter();
@@ -45,7 +45,7 @@ fn run() -> Result<(), String> {
             "--margin" => sheet.margin_mm = num(val()?)?,
             "--gap" => sheet.gap_mm = num(val()?)?,
             "--cols" => sheet.columns = Some(num(val()?)? as u32),
-            "--seq" => seq = Some(num(val()?)? as usize),
+            "--seq" => seq = Some(val()?.split(',').map(|v| num(v).map(|n| n as usize)).collect::<Result<_, _>>()?),
             "--picture" => picture = Some(layout::parse_aspect(val()?).ok_or(usage)?),
             _ => return Err(usage.into()),
         }
@@ -60,7 +60,7 @@ fn run() -> Result<(), String> {
         for (i, n) in names.iter().enumerate() {
             eprintln!("sequence {i}: {n}");
         }
-        let cut = bin::BinCut::open(&master, b, seq, &|| true)?;
+        let cut = bin::BinCut::open(&master, b, seq.as_deref(), &|| true)?;
         let shots = cut.shots();
         let volumes: Vec<PathBuf> = list.to_string_lossy().split(':').map(PathBuf::from).collect();
         // shortcut: the bin gives no frame size before grabbing, so the grid is planned for 16:9 (or --picture)

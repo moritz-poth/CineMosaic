@@ -22,7 +22,7 @@ Eine EDL enthält nur eine Videospur und keine Framerate; CineMosaic nimmt die F
 
 ## Media-Composer-Bin
 
-Wähle Quelle › Media-Composer-Bin, dann den Bin (.avb). Unter Sequenz nimmt Alle Sequenzen (Standard) jede Sequenz des Bins nacheinander, nach Namen sortiert (Reel 2 vor Reel 10); oder wähle eine einzelne. Darunter stehen alle Volumes mit einem Ordner „Avid MediaFiles“; schalte die aus, die CineMosaic nicht durchsuchen soll. Volumes, die du später anschließt, erscheinen von selbst.
+Wähle Quelle › Media-Composer-Bin, dann den Bin (.avb). Unter Sequenzen hat jede Sequenz des Bins einen Schalter: Alle Sequenzen (Standard) nimmt alle nacheinander, nach Namen sortiert (Reel 2 vor Reel 10); schalte nur die ein, die du willst – eine oder drei von fünf. Darunter stehen alle Volumes mit einem Ordner „Avid MediaFiles“; schalte die aus, die CineMosaic nicht durchsuchen soll. Volumes, die du später anschließt, erscheinen von selbst.
 
 CineMosaic verfolgt jeden Shot durch Effekte, Motion-Effekte, Multicam und Nests bis zu seiner Mediendatei. Clips aus anderen Bins des Projekts werden auch gefunden. AMA-verlinkte Dateien (QuickTime und andere außerhalb von Avid MediaFiles) werden dort gelesen, wo Media Composer sie verlinkt.
 
@@ -32,7 +32,7 @@ Klicke Stills holen. Der Balken zeigt, wie weit es ist und wie lange es noch dau
 
 ## Bildformat
 
-Hat dein Bild schwarze Balken, wähle sein Format unter Bogen › Bildformat: 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 oder ein eigenes (zum Beispiel 2.39 oder 21:9). CineMosaic schneidet die Balken um die Bildmitte ab – oben und unten bei breiten Formaten, links und rechts bei schmalen. Vollbild behält das ganze Bild. Du kannst das Format ändern, ohne die Stills neu zu holen.
+Hat dein Bild schwarze Balken, wähle sein Format unter Bogen › Bildformat – Filmformate (4:3, 1.66:1, 16:9, 1.85:1, 2:1, 2.35:1, 2.39:1) oder Social-Media-Formate (9:16 für Reels, TikTok, Shorts und Stories, 4:5, 3:4, 1:1, 2:3, 1.91:1, 16:9). Breite : Höhe darunter zeigt das Format immer; dort tippst du auch ein eigenes (zum Beispiel 2.39 : 1 oder 21 : 9). CineMosaic schneidet die Balken um die Bildmitte ab – oben und unten bei breiten Formaten, links und rechts bei schmalen. Vollbild behält das ganze Bild. Du kannst das Format ändern, ohne die Stills neu zu holen.
 
 ## Der Bogen
 
@@ -68,7 +68,7 @@ Die Schrift wird über ihren Namen gemerkt: Fehlt sie auf diesem Mac, bleibt die
 
 ## Speichern
 
-Wähle das Format und klicke Speichern…. PNG, TIFF und JPEG enthalten die Auflösung, ein Druckprogramm druckt sie also in der gewählten Größe. Die PDF-Seite hat die Papiergröße. Im Finder zeigen zeigt die gespeicherte Datei.
+Wähle das Format und klicke Speichern…. Sind Stills, die der Bogen braucht, noch nicht geholt (nach einer Änderung von Format oder Bogen), sagt CineMosaic das vorher: trotzdem speichern mit grauen Feldern, oder abbrechen und sie holen. PNG, TIFF und JPEG enthalten die Auflösung, ein Druckprogramm druckt sie also in der gewählten Größe. Die PDF-Seite hat die Papiergröße. Im Finder zeigen zeigt die gespeicherte Datei.
 
 ## Einstellungen und Hilfe
 
