@@ -636,9 +636,21 @@ fn read_sheet(app: &AppWindow) -> Result<layout::Sheet, &'static str> {
     Ok(layout::Sheet { width_mm: w, height_mm: h, dpi, margin_mm: margin, gap_mm: gap, columns, ..Default::default() })
 }
 
-/// Paper from the list (1.. = A0..A6): its size into width × height, in the orientation and unit chosen.
+/// Paper from the list (1..=7 DIN A0..A6, 8.. social media sizes): its size into width × height, a DIN size in the
+/// orientation and unit chosen, a social media size in pixels as it is (unit switches to px).
 fn show_paper(app: &AppWindow) {
-    let Some(d) = (app.get_paper() as usize).checked_sub(1).and_then(|i| layout::DIN.get(i)) else { return };
+    let i = app.get_paper() as usize;
+    if let Some(&(w, h, _)) = i.checked_sub(layout::DIN.len() + 1).and_then(|k| layout::SOCIAL.get(k)) {
+        switch_unit(app, true); // would make the paper Custom
+        app.set_paper(i as i32);
+        app.set_custom_w(w.to_string().into());
+        app.set_custom_h(h.to_string().into());
+        if w != h {
+            app.set_landscape(w > h);
+        }
+        return;
+    }
+    let Some(d) = i.checked_sub(1).and_then(|i| layout::DIN.get(i)) else { return };
     let (short, long) = (d.1.min(d.2), d.1.max(d.2));
     let (w, h) = if app.get_landscape() { (long, short) } else { (short, long) };
     let per = mm_per_unit(app);
@@ -650,6 +662,7 @@ fn show_paper(app: &AppWindow) {
 fn size_edited(app: &AppWindow) {
     let per = mm_per_unit(app);
     if let (Ok(w), Ok(h)) = (whole(&app.get_custom_w(), ""), whole(&app.get_custom_h(), "")) {
+        let typed = (w, h);
         let (w, h) = (w * per, h * per);
         if w != h {
             app.set_landscape(w > h);
@@ -657,7 +670,10 @@ fn size_edited(app: &AppWindow) {
         // within 0.6 mm: px sizes are rounded
         let near = |a: f64, b: f64| (a - b).abs() < 0.6;
         let a_size = layout::DIN.iter().position(|d| near(d.1.min(d.2), w.min(h)) && near(d.1.max(d.2), w.max(h)));
-        app.set_paper(a_size.map_or(0, |i| i as i32 + 1));
+        // social media sizes: exactly these pixels, in this orientation
+        let social = app.get_px_units().then(|| layout::SOCIAL.iter().position(|s| (s.0 as f64, s.1 as f64) == typed)).flatten();
+        let i = a_size.map(|i| i + 1).or(social.map(|k| k + layout::DIN.len() + 1)).unwrap_or(0);
+        app.set_paper(i as i32);
     }
     refresh(app);
 }
@@ -689,7 +705,12 @@ fn switch_unit(app: &AppWindow, px: bool) {
             set(app, format!("{}", (v * old / new).round().max(least) as i64).into());
         }
     }
-    show_paper(app); // an A size exactly, not a rounded conversion
+    // a DIN size exactly, not a rounded conversion; a social media size is pixels, in mm it is Custom
+    if app.get_paper() as usize > layout::DIN.len() {
+        app.set_paper(0);
+    } else {
+        show_paper(app);
+    }
 }
 
 /// "#rrggbb", "rrggbb" or "#rgb" → colour.
@@ -905,7 +926,7 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     let boolean = |k: &str, set: &dyn Fn(bool)| v.get(k).and_then(|x| x.as_bool()).into_iter().for_each(set);
     let text = |k: &str, set: &dyn Fn(SharedString)| v.get(k).and_then(|x| x.as_str()).filter(|s| s.len() < 100).into_iter().for_each(|s| set(s.into()));
     boolean("px-units", &|b| app.set_px_units(b));
-    int("paper", layout::DIN.len() as i64, &|n| app.set_paper(n));
+    int("paper", (layout::DIN.len() + layout::SOCIAL.len()) as i64, &|n| app.set_paper(n));
     text("custom-w", &|s| app.set_custom_w(s));
     text("custom-h", &|s| app.set_custom_h(s));
     boolean("landscape", &|b| app.set_landscape(b));
@@ -917,8 +938,12 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
     if let Some(a) = field("aspect").or_else(|| Some(format!("{}:{}", field("aspect-w")?, field("aspect-h")?))) {
         // since 2026-11-21: the format as typed ("2.39:1", "9:16"); for a few hours two fields
-        int("picture", layout::PICTURE.len() as i64 + 1, &|n| app.set_picture(n));
+        // until 2026-11-22 the menu held social media formats too (8–14, Custom 15): the format decides
+        int("picture", 15, &|n| app.set_picture(n));
         app.set_aspect(a.into());
+        if app.get_picture() > 0 {
+            picture_edited(app);
+        }
     } else {
         // presets from before: 1–7 = the film formats as now, 8 = Custom "2.39" or "21:9"
         int("picture", 8, &|n| app.set_picture(n));
@@ -985,22 +1010,39 @@ fn read_picture(app: &AppWindow) -> Result<Option<f64>, &'static str> {
     layout::parse_aspect(&app.get_aspect()).map(Some).ok_or("aspect")
 }
 
-/// The picture-format menu: Full frame, the film formats, the social media formats (with their platforms), Custom;
-/// the two section titles cannot be chosen. Menu index ↔ `picture`: see `picture-menu-index` in app.slint.
+/// The picture-format menu: Full frame, the film formats, Custom (menu index = `picture`).
 fn picture_menu(app: &AppWindow) {
-    const PLATFORMS: [&str; 7] = ["Reels, TikTok, Shorts, Stories", "Instagram, Facebook", "Instagram", "", "Pinterest", "Facebook, LinkedIn", "YouTube, X"];
-    let entry = |title: String, header: bool| MenuChoice { title: title.into(), checked: header };
-    let format = |&(w, h): &(f64, f64)| format!("{}:{}", layout::ratio_text(w), layout::ratio_text(h));
-    let mut items = vec![entry(tr(["Full frame", "Vollbild", "Image entière", "Imagen completa"]), false)];
-    items.push(entry(tr(["Film formats", "Filmformate", "Formats cinéma", "Formatos de cine"]), true));
-    items.extend(layout::PICTURE[..layout::FILM].iter().map(|f| entry(format(f), false)));
-    items.push(entry(tr(["Social media formats", "Social-Media-Formate", "Formats réseaux sociaux", "Formatos de redes sociales"]), true));
-    items.extend(layout::PICTURE[layout::FILM..].iter().zip(PLATFORMS).map(|(f, p)| {
-        let p = if p.is_empty() { tr(["square", "quadratisch", "carré", "cuadrado"]) } else { p.to_string() };
-        entry(format!("{} – {p}", format(f)), false)
-    }));
-    items.push(entry(tr(["Custom", "Eigenes", "Personnalisé", "Personalizado"]), false));
+    let entry = |title: String| MenuChoice { title: title.into(), checked: false };
+    let mut items = vec![entry(tr(["Full frame", "Vollbild", "Image entière", "Imagen completa"]))];
+    items.extend(layout::PICTURE.iter().map(|&(w, h)| entry(format!("{}:{}", layout::ratio_text(w), layout::ratio_text(h)))));
+    items.push(entry(tr(["Custom", "Eigenes", "Personnalisé", "Personalizado"])));
     app.set_picture_menu(ModelRc::new(VecModel::from(items)));
+}
+
+/// The paper menu: Custom, DIN A0–A6, social media sizes in pixels (with their platforms); the two section titles
+/// cannot be chosen. Menu index ↔ `paper`: see the paper row in app.slint.
+fn paper_menu(app: &AppWindow) {
+    let entry = |title: String, header: bool| MenuChoice { title: title.into(), checked: header };
+    let mut items = vec![entry(tr(["Custom", "Eigenes", "Personnalisé", "Personalizado"]), false)];
+    items.push(entry("DIN".into(), true));
+    items.extend(layout::DIN.iter().map(|d| entry(format!("DIN {}", d.0), false)));
+    items.push(entry(tr(["Social media", "Social Media", "Réseaux sociaux", "Redes sociales"]), true));
+    items.extend(layout::SOCIAL.iter().map(|&(w, h, p)| {
+        let p = if p.is_empty() { tr(["square", "quadratisch", "carré", "cuadrado"]) } else { p.to_string() };
+        entry(format!("{w} × {h} px – {p}"), false)
+    }));
+    app.set_paper_menu(ModelRc::new(VecModel::from(items)));
+}
+
+/// The button text of the paper menu: "DIN A4", "1080 × 1920 px" or Custom.
+fn paper_label(app: &AppWindow) {
+    let i = app.get_paper() as usize;
+    let label = match (i.checked_sub(1).and_then(|k| layout::DIN.get(k)), i.checked_sub(layout::DIN.len() + 1).and_then(|k| layout::SOCIAL.get(k))) {
+        (Some(d), _) => format!("DIN {}", d.0),
+        (_, Some(s)) => format!("{} × {} px", s.0, s.1),
+        _ => tr(["Custom", "Eigenes", "Personnalisé", "Personalizado"]),
+    };
+    app.set_paper_label(label.into());
 }
 
 /// A format from the menu: its width : height into the field (Full frame shows the stills' own format).
@@ -1064,6 +1106,7 @@ fn refresh(app: &AppWindow) {
         show_picture(app);
     }
     picture_label(app);
+    paper_label(app);
     app.set_page_aspect((sheet.width_mm / sheet.height_mm) as f32);
     with_state(app, |st| {
         let st = st.borrow();
@@ -1465,19 +1508,34 @@ fn detect_cuts(app: &AppWindow) {
     if todo.is_empty() {
         return;
     }
+    // the film between these timecodes (empty: from the start / to the end): opening and end titles stay out
+    let (from, to) = (app.get_detect_from().trim().to_string(), app.get_detect_to().trim().to_string());
+    let tc = |s: &str, info: &frames::VideoInfo| if s.is_empty() { Ok(None) } else { cinemosaic::timeline::parse_tc(s, info.rate, false).map(Some).ok_or(()) };
+    let mut ranges = vec![];
+    for (_, info) in &todo {
+        match (tc(&from, info), tc(&to, info)) {
+            (Ok(f), Ok(t)) => ranges.push((f.map_or(0, |f| (f - info.start_tc).max(0)), t.map(|t| t - info.start_tc))),
+            (f, _) => {
+                let which = if f.is_err() { &from } else { &to };
+                app.set_source_error(tr(["“{}” is not a timecode like 01:00:00:00", "„{}“ ist kein Timecode wie 01:00:00:00", "« {} » n’est pas un timecode comme 01:00:00:00", "«{}» no es un timecode como 01:00:00:00"]).replace("{}", which).into());
+                return;
+            }
+        }
+    }
     app.set_state(1);
     app.set_paused(false);
     app.set_progress(0.0);
     app.set_work_text(tr(["Looking for the cuts…", "Suche die Schnitte…", "Recherche des coupes…", "Buscando los cortes…"]).into());
     app.set_time_left("".into());
     app.set_source_error("".into());
+    let ranged = !from.is_empty() || !to.is_empty();
     let weak = app.as_weak();
     std::thread::spawn(move || {
         let start = Instant::now();
         let n = todo.len();
         let mut found = vec![];
         let mut errors = vec![];
-        for (k, (path, info)) in todo.iter().enumerate() {
+        for (k, ((path, info), &(from, to))) in todo.iter().zip(&ranges).enumerate() {
             let progress = |done: i64, total: i64| {
                 let part = if total > 0 { done as f64 / total as f64 } else { 0.0 };
                 let share = (k as f64 + part) / n as f64;
@@ -1494,8 +1552,11 @@ fn detect_cuts(app: &AppWindow) {
                     }
                 });
             };
-            match frames::detect_cuts(path, info.rate, &|| gate.go(), &progress) {
+            // a master wholly before the start or after the end has nothing to look at
+            let outside = to.is_some_and(|t| t <= from);
+            match if outside { Ok(Some(vec![])) } else { frames::detect_cuts(path, info.rate, from, to, &|| gate.go(), &progress) } {
                 Ok(Some(cuts)) if cuts.len() > 1 => found.push((path.clone(), cuts)),
+                Ok(Some(_)) if ranged => errors.push(format!("{}: {}", file_name(path), tr(["no picture between start and end", "kein Bild zwischen Beginn und Ende", "aucune image entre début et fin", "no hay imagen entre inicio y fin"]))),
                 Ok(Some(_)) => errors.push(format!("{}: {}", file_name(path), tr(["no picture found", "kein Bild gefunden", "aucune image trouvée", "no se encontró imagen"]))),
                 Ok(None) => break,
                 Err(e) => errors.push(format!("{}: {e}", file_name(path))),
@@ -2134,6 +2195,7 @@ fn new_window(ctx: &Rc<Ctx>) -> Result<AppWindow, slint::PlatformError> {
     show_fonts(&app);
     preset_menu(&app);
     picture_menu(&app);
+    paper_menu(&app);
     show_picture(&app);
     refresh(&app);
     app.show()?;
@@ -2525,7 +2587,8 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
                 app.set_custom_w(h);
                 app.set_custom_h(w);
             }
-            refresh(&app);
+            // a turned social media size is another one or Custom
+            size_edited(&app);
         }
     });
     app.on_unit_chosen({
@@ -2742,6 +2805,7 @@ fn show_sequences(app: &AppWindow) {
 /// After a language change: the lines Rust wrote are written again in the new language.
 fn load_texts_again(app: &AppWindow) {
     picture_menu(app);
+    paper_menu(app);
     show_sequences(app);
     with_state(app, |st| {
         let st = st.borrow();

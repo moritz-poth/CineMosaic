@@ -1642,6 +1642,9 @@ export component AppWindow inherits SheetWindow {
     callback remove-list(int);
     // a master without cut list: its cuts can be found in the picture
     in property <bool> can-detect;
+    // the film between these master timecodes (empty: from the start / to the end): titles stay out
+    in-out property <string> detect-from;
+    in-out property <string> detect-to;
     callback detect-cuts();
     in property <string> source-info;
     in property <string> source-error;
@@ -1654,13 +1657,16 @@ export component AppWindow inherits SheetWindow {
     in property <bool> can-grab;
     // stills the sheet needs that were not grabbed yet (the sheet changed after grabbing)
     in property <int> missing;
-    // sheet (index into the paper list: 0 custom, 1.. A0..A6); the list fills width × height, editing them picks the
+    // sheet (index into the paper list: 0 custom, 1–7 DIN A0..A6, 8–14 social media sizes in px); the list fills width × height, editing them picks the
     // matching size or Custom (Rust)
     in-out property <int> paper: 5;
     // lengths (paper, margin, gap, frame line, headline move) in px instead of mm; Rust converts the fields on a switch
     in-out property <bool> px-units;
     out property <string> unit: root.px-units ? "px" : "mm";
     callback paper-chosen(int);
+    // Custom, DIN, social media (section titles: `checked`), filled by Rust; the button shows `paper-label`
+    in property <[MenuChoice]> paper-menu;
+    in property <string> paper-label;
     callback orientation-chosen(bool);
     callback unit-chosen(bool);
     callback size-edited();
@@ -1802,13 +1808,23 @@ export component AppWindow inherits SheetWindow {
                         }
                         for name[i] in root.list-names: FileRow { text: name; removed => { root.remove-list(i); } }
                         Para { text: @tr("A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."); }
-                        if root.can-detect: VerticalLayout {
+                        // always there; usable while a master has neither a cut list nor detected cuts
+                        VerticalLayout {
                             spacing: 6px;
                             HorizontalLayout {
                                 alignment: start;
-                                CheckButton { text: @tr("Detect cuts"); small: true; enabled: root.state != 1; clicked => { root.detect-cuts(); } }
+                                CheckButton { text: @tr("Detect cuts"); small: true; enabled: root.state != 1 && root.can-detect; clicked => { root.detect-cuts(); } }
                             }
                             Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
+                            Row {
+                                text: @tr("Film starts at");
+                                NumberField { text <=> root.detect-from; scrub: 0; unit: ""; label: @tr("Film starts at"); }
+                            }
+                            Row {
+                                text: @tr("Film ends at");
+                                NumberField { text <=> root.detect-to; scrub: 0; unit: ""; label: @tr("Film ends at"); }
+                            }
+                            Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."); }
                         }
                     }
                     if root.mode == 1: VerticalLayout {
@@ -1888,9 +1904,9 @@ export component AppWindow inherits SheetWindow {
                             label: @tr("Picture format");
                             entries: root.picture-menu;
                             text: root.picture-label;
-                            // menu: 0 Full frame, 1 heading, 2–8 film, 9 heading, 10–16 social media, 17 Custom
-                            current: root.picture == 0 ? 0 : root.picture <= 7 ? root.picture + 1 : root.picture + 2;
-                            selected(i) => { root.picture-chosen(i == 0 ? 0 : i <= 8 ? i - 1 : i - 2); }
+                            // menu: 0 Full frame, 1–7 film formats, 8 Custom
+                            current: root.picture;
+                            selected(i) => { root.picture-chosen(i); }
                         }
                     }
                     Row {
@@ -1901,11 +1917,13 @@ export component AppWindow inherits SheetWindow {
                     if root.picture != 0: Para { text: @tr("Black bars outside this format are cut off (top and bottom or left and right)."); }
                     Row {
                         text: @tr("Paper");
-                        Dropdown {
+                        SectionDropdown {
                             label: @tr("Paper");
-                            items: [@tr("Custom"), "A0", "A1", "A2", "A3", "A4", "A5", "A6"];
-                            current: root.paper;
-                            selected(i) => { root.paper-chosen(i); }
+                            entries: root.paper-menu;
+                            text: root.paper-label;
+                            // menu: 0 Custom, 1 heading, 2–8 DIN A0–A6, 9 heading, 10–16 social media sizes
+                            current: root.paper == 0 ? 0 : root.paper <= 7 ? root.paper + 1 : root.paper + 2;
+                            selected(i) => { root.paper-chosen(i == 0 ? 0 : i <= 8 ? i - 1 : i - 2); }
                         }
                     }
                     Row {

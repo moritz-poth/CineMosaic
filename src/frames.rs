@@ -66,10 +66,11 @@ pub fn grab(file: &Path, frame: i64, rate: Rate, out: &Path) -> Result<(), Strin
     Ok(())
 }
 
-/// Finds the cuts of `file` in the picture (ffmpeg scdet, picture scaled down for speed): the first frame of every
-/// shot (0 = the file's first frame) and, last, the frame count. `progress(frames read, frames in total)`; None when
-/// `go` says stop. Reads the whole file: takes about as long as decoding it.
-pub fn detect_cuts(file: &Path, rate: Rate, go: &dyn Fn() -> bool, progress: &dyn Fn(i64, i64)) -> Result<Option<Vec<i64>>, String> {
+/// Finds the cuts of `file` in the picture (ffmpeg scdet, picture scaled down for speed) between frame `from` and
+/// `to` (file frames, 0 = first; None = to the end; opening and end titles stay out): the first frame of every shot
+/// and, last, the end. `progress(frames read, frames in total)`; None when `go` says stop. Takes about as long as
+/// decoding that part.
+pub fn detect_cuts(file: &Path, rate: Rate, from: i64, to: Option<i64>, go: &dyn Fn() -> bool, progress: &dyn Fn(i64, i64)) -> Result<Option<Vec<i64>>, String> {
     use std::io::{BufRead, BufReader, Read};
     let total = Command::new(tool("ffprobe"))
         .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"])
@@ -78,8 +79,23 @@ pub fn detect_cuts(file: &Path, rate: Rate, go: &dyn Fn() -> bool, progress: &dy
         .ok()
         .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok())
         .map_or(0, |d| (d * rate.fps()).round() as i64);
-    let mut child = Command::new(tool("ffmpeg"))
-        .args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info", "-i"])
+    let end = match to {
+        Some(t) if total == 0 || t < total => t,
+        _ => total,
+    };
+    let total = (end - from).max(0);
+    let secs = |f: i64| format!("{:.6}", (f as f64 - 0.25).max(0.0) / rate.fps());
+    let mut cmd = Command::new(tool("ffmpeg"));
+    cmd.args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info"]);
+    // input seeking decodes exactly from `from`; the times scdet reports then count from there
+    if from > 0 {
+        cmd.args(["-ss", &secs(from)]);
+    }
+    if let Some(to) = to {
+        cmd.args(["-to", &secs(to)]);
+    }
+    let mut child = cmd
+        .arg("-i")
         .arg(file)
         .args(["-an", "-sn", "-dn", "-vf", "scale=320:-2,scdet=threshold=10", "-f", "null", "-", "-progress", "pipe:1"])
         .stdout(std::process::Stdio::piped())
@@ -110,7 +126,10 @@ pub fn detect_cuts(file: &Path, rate: Rate, go: &dyn Fn() -> bool, progress: &dy
     if !status.success() {
         return Err(format!("the picture could not be analysed: {}", log.lines().last().unwrap_or("").trim()));
     }
-    Ok(Some(cut_frames(&log, rate, frames)))
+    if frames == 0 {
+        return Ok(Some(vec![]));
+    }
+    Ok(Some(cut_frames(&log, rate, frames).into_iter().map(|f| f + from).collect()))
 }
 
 /// The scdet lines of ffmpeg's log ("lavfi.scd.time: 3.04") → 0, the first frame of each further shot, the frame count.

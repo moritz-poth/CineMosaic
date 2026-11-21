@@ -268,14 +268,19 @@ impl Grid {
     }
 }
 
-/// Picture formats offered for cropping (name, width / height).
-/// Picture formats of the menu as width : height: film formats first (`FILM` of them), then social media formats.
-/// The order of the first seven is kept: presets store the index.
-pub const PICTURE: [(f64, f64); 14] = [
-    (4.0, 3.0), (1.66, 1.0), (16.0, 9.0), (1.85, 1.0), (2.0, 1.0), (2.35, 1.0), (2.39, 1.0),
-    (9.0, 16.0), (4.0, 5.0), (3.0, 4.0), (1.0, 1.0), (2.0, 3.0), (1.91, 1.0), (16.0, 9.0),
+/// Film formats offered for cropping, as width : height (presets store the index).
+pub const PICTURE: [(f64, f64); 7] = [(4.0, 3.0), (1.66, 1.0), (16.0, 9.0), (1.85, 1.0), (2.0, 1.0), (2.35, 1.0), (2.39, 1.0)];
+
+/// Social media sizes for the paper list, in pixels, with the platforms that use them ("" = square).
+pub const SOCIAL: [(u32, u32, &str); 7] = [
+    (1080, 1920, "Reels, TikTok, Shorts, Stories"),
+    (1080, 1350, "Instagram, Facebook"),
+    (1080, 1440, "Instagram"),
+    (1080, 1080, ""),
+    (1000, 1500, "Pinterest"),
+    (1200, 628, "Facebook, LinkedIn"),
+    (1920, 1080, "YouTube, X"),
 ];
-pub const FILM: usize = 7;
 
 /// "2.39", "16", "1" – a format number without needless decimals.
 pub fn ratio_text(v: f64) -> String {
