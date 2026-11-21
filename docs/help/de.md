@@ -36,17 +36,21 @@ Hat dein Bild schwarze Balken, wähle sein Format unter Bogen › Bildformat: 4:
 
 ## Der Bogen
 
-Papier: DIN A0 bis A6 oder Eigenes (Breite × Höhe in mm), Hoch- oder Querformat. Auflösung in dpi: 300 für den Druck, 150 für den Bildschirm. Rand ist der leere Rand um alles, Abstand der Platz zwischen zwei Stills, beides in mm – ins Feld drücken und nach links oder rechts ziehen ändert den Wert, Klicken öffnet es zum Tippen. Mit Spalten automatisch wählt CineMosaic die Spaltenzahl, bei der die Stills am größten werden; schalte es aus, um die Zahl selbst festzulegen. Die Zeile darunter zeigt das Raster, die Größe des Bogens in Pixeln und die Größe eines Stills.
+Breite × Höhe steht immer da: DIN A0 bis A6 in der Liste Papier füllt die Werte ein, oder du tippst eine eigene Größe – die Liste zeigt dann Eigenes (oder das passende A-Format). Hoch- oder Querformat dreht den Bogen. Einheit schaltet alle Längen – Papier, Rand, Abstand, Rahmenlinie und X und Y der Headline – zwischen mm und Pixeln um; die Schriftgröße bleibt in Punkt. Alle sind ganze Zahlen. Auflösung in dpi: 300 für den Druck, 150 für den Bildschirm. Rand ist der leere Rand um alles, Abstand der Platz zwischen zwei Stills – ins Feld drücken und nach links oder rechts ziehen ändert den Wert, Klicken öffnet es zum Tippen. Mit Spalten automatisch wählt CineMosaic die Spaltenzahl, bei der die Stills am größten werden; schalte es aus, um die Zahl selbst festzulegen. Die Zeile darunter zeigt das Raster und die Größe eines Stills in Pixeln.
 
 Sehr große Bögen (A0 mit 600 dpi) brauchen zum Speichern viel Arbeitsspeicher; die Zeile unter dem Bogen sagt, wie viel.
 
 ## Rahmenlinie, Headline und Schnittmarken
 
-Die Seitenspalte hat vier Reiter: Quelle, Bogen, Linie und Headline. Unter Linie zieht Rahmenlinie eine Linie um den Bogen: wähle ein Muster (einfach, doppelt, dick – dünn, dünn – dick, dünn – dick – dünn, zwei nah und eine weiter), die Dicke einer dünnen Linie, den Abstand zum Rand und die Farbe (zuerst Schwarz; ein Farbfeld oder ein Hex-Wert wie #3c4146).
+Die Seitenspalte hat vier Reiter: Quelle, Bogen, Rahmenlinie und Headline. Unter Rahmenlinie zieht der Schalter eine Linie um den Bogen: wähle ein Muster (einfach, doppelt, dick – dünn, dünn – dick, dünn – dick – dünn, zwei nah und eine weiter), die Dicke einer dünnen Linie, den Abstand zum Rand und die Farbe (zuerst Schwarz; ein Farbfeld oder ein Hex-Wert wie #3c4146).
 
-Unter Headline tippst du den Titel. Die Schriftliste zeigt jede Schrift deines Macs in ihrem eigenen Aussehen; ↑ und ↓ blättern durch, der Bogen folgt sofort, ein Buchstabe springt zur nächsten Schrift mit diesem Anfang. Dann Größe in Punkt, fett, kursiv und Farbe. Der Anker ist der Punkt des Bogens, an dem die Headline hängt – einer von neun, wie in einem Bildprogramm; X und Y verschieben sie von dort in mm. Du kannst die Headline auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie um sie herum unterbrochen. Oben oder unten halten die Stills Abstand; in der Mitte liegt sie über ihnen.
+Unter Headline tippst du den Titel. Die Schriftliste zeigt jede Schrift deines Macs in ihrem eigenen Aussehen; ↑ und ↓ blättern durch, der Bogen folgt sofort, ein Buchstabe springt zur nächsten Schrift mit diesem Anfang. Dann Größe in Punkt, fett, kursiv und Farbe. Der Anker ist der Punkt des Bogens, an dem die Headline hängt – einer von neun, wie in einem Bildprogramm; X und Y verschieben sie von dort in mm oder Pixeln. Du kannst die Headline auch in der Vorschau ziehen. Wo sie die Rahmenlinie überdeckt, ist die Linie um sie herum unterbrochen. Oben oder unten halten die Stills Abstand; in der Mitte liegt sie über ihnen.
 
 Bogen › Schnittmarken legt den Bogen in einer Fläche im Bildformat innerhalb des Papiers an – bei Stills in 2:1 eine Fläche in 2:1 – und setzt Schnittmarken an ihre Ecken, damit du sie ausschneiden kannst.
+
+## Projekte
+
+Ablage › Projekt sichern (⌘S) speichert alles als eine Projektdatei: Quelle, Bogen, Headline und die geholten Stills. Ablage › Projekt öffnen… (⌘O), Zuletzt geöffnet oder ein Doppelklick im Finder holt es zurück – sofort, mit seinen Stills, auch wenn Master, Bin oder Volumes nicht angeschlossen sind. Danach liest CineMosaic die Quelle neu: Hat sich der Schnitt geändert, behalten unveränderte Shots ihre Stills, neue oder geänderte sind grau und „N fehlende Stills holen“ holt nur diese (schon geholte Frames werden wiederverwendet). Jedes Projekt hat sein eigenes Fenster: Neues Projekt (⌘N) öffnet ein neues, leeres Fenster, und ein geöffnetes Projekt bekommt ebenfalls ein eigenes (ein leeres Fenster übernimmt es; ein schon offenes Projekt kommt nach vorn). Projekt sichern unter… (⇧⌘S) legt eine Kopie an, Fenster schließen (⌘W) schließt eins. Bevor ungesicherte Änderungen verloren gingen – Fenster schließen oder Beenden – fragt CineMosaic, ob du sie sichern möchtest.
 
 ## Presets
 

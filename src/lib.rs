@@ -12,6 +12,7 @@ pub mod frames;
 pub mod layout;
 pub mod log;
 pub mod media;
+pub mod project;
 pub mod report;
 pub mod selftest;
 pub mod timeline;

@@ -363,6 +363,15 @@ export global Shared {
     callback show-about();
     callback show-settings();
     callback show-log();
+    // File menu (projects); recent = names of the projects opened last, newest first
+    in property <[string]> recent;
+    callback new-project();
+    callback open-project();
+    callback open-recent(int);
+    callback clear-recent();
+    callback save-project();
+    callback save-project-as();
+    callback close-window();
     // Updates (src/update.rs): laufende Version, neuere Version ("" = keine), Zustand 0 nichts, 1 prüft, 2 aktuell,
     // 3 installiert, 4 Fehler; Fehlerart 0 Prüfen, 1 Laden, 2 beschädigt, 3 Ersetzen, 4 Neustart
     in property <string> version;
@@ -438,6 +447,21 @@ component SheetWindow inherits Window {
     }
     changed height => { Shared.resized(); }
     MenuBar {
+        Menu {
+            title: @tr("File");
+            MenuItem { title: @tr("New Project"); shortcut: @keys(Control + N); activated => { Shared.new-project(); } }
+            MenuItem { title: @tr("Open Project…"); shortcut: @keys(Control + O); activated => { Shared.open-project(); } }
+            Menu {
+                title: @tr("Open Recent");
+                for name[i] in Shared.recent: MenuItem { title: name; activated => { Shared.open-recent(i); } }
+                MenuSeparator { }
+                MenuItem { title: @tr("Clear Menu"); enabled: Shared.recent.length > 0; activated => { Shared.clear-recent(); } }
+            }
+            MenuSeparator { }
+            MenuItem { title: @tr("Close Window"); shortcut: @keys(Control + W); activated => { Shared.close-window(); } }
+            MenuItem { title: @tr("Save Project"); shortcut: @keys(Control + S); activated => { Shared.save-project(); } }
+            MenuItem { title: @tr("Save Project As…"); shortcut: @keys(Control + Shift + S); activated => { Shared.save-project-as(); } }
+        }
         Menu {
             title: @tr("Help");
             MenuItem {
@@ -1474,7 +1498,10 @@ component ZoomButton {
 }
 
 export component AppWindow inherits SheetWindow {
-    title: "CineMosaic";
+    // the open project's name ("" = none); every project window has its own id (Rust keeps its state under it)
+    in property <string> project-name;
+    in property <int> win-id;
+    title: root.project-name == "" ? "CineMosaic" : root.project-name + " – CineMosaic";
     // resizable; never smaller than the side column needs (user 2026-11-20)
     min-width: root.smallest-width;
     min-height: root.smallest-height;
@@ -1505,8 +1532,16 @@ export component AppWindow inherits SheetWindow {
     in property <bool> can-grab;
     // stills the sheet needs that were not grabbed yet (the sheet changed after grabbing)
     in property <int> missing;
-    // sheet (index into the paper list: 0 custom, 1.. A0..A6)
+    // sheet (index into the paper list: 0 custom, 1.. A0..A6); the list fills width × height, editing them picks the
+    // matching size or Custom (Rust)
     in-out property <int> paper: 5;
+    // lengths (paper, margin, gap, frame line, headline move) in px instead of mm; Rust converts the fields on a switch
+    in-out property <bool> px-units;
+    out property <string> unit: root.px-units ? "px" : "mm";
+    callback paper-chosen(int);
+    callback orientation-chosen(bool);
+    callback unit-chosen(bool);
+    callback size-edited();
     // picture format: 0 full frame (no crop), 1..7 the formats in layout::PICTURE, 8 custom
     in-out property <int> picture: 0;
     in-out property <string> custom-aspect: "2.39";
@@ -1517,22 +1552,22 @@ export component AppWindow inherits SheetWindow {
     in-out property <bool> trim;
     // frame line and headline; colours as "#rrggbb", the swatch shows what Rust read
     in-out property <bool> line-on;
-    in-out property <string> line-width: "0.5";
+    in-out property <string> line-width: "1";
     in-out property <string> line-inset: "6";
     in-out property <string> line-color: "#000000";
     in property <color> line-swatch: black;
     in-out property <int> line-pattern;
     in-out property <string> headline;
-    // headline anchor 0–8 (rows top / middle / bottom × left / centre / right) and its move in mm
+    // headline anchor 0–8 (rows top / middle / bottom × left / centre / right) and its move in mm or px
     in property <int> head-anchor: 1;
     in-out property <string> head-dx: "0";
     in-out property <string> head-dy: "8";
-    // where Rust drew the headline, as fractions of the page, and the page width in mm (dragging)
+    // where Rust drew the headline, as fractions of the page, and the page width in mm or px (dragging)
     in property <float> head-bx;
     in property <float> head-by;
     in property <float> head-bw;
     in property <float> head-bh;
-    in property <float> page-w-mm: 297;
+    in property <float> page-w: 297;
     callback anchor-chosen(int);
     callback jump-font(string) -> int;
     in property <[string]> fonts;
@@ -1543,8 +1578,8 @@ export component AppWindow inherits SheetWindow {
     in-out property <string> head-color: "#000000";
     in property <color> head-swatch: black;
 
-    in-out property <string> custom-w: "500";
-    in-out property <string> custom-h: "700";
+    in-out property <string> custom-w: "297";
+    in-out property <string> custom-h: "210";
     in-out property <string> dpi: "300";
     in-out property <string> margin: "10";
     in-out property <string> gap: "3";
@@ -1607,7 +1642,7 @@ export component AppWindow inherits SheetWindow {
                     UpdateOffer { text-width: Metrics.text-width; }
                 }
                 TabStrip {
-                    items: [@tr("Source"), @tr("Sheet"), @tr("Line"), @tr("Headline")];
+                    items: [@tr("Source"), @tr("Sheet"), @tr("Frame line"), @tr("Headline")];
                     current <=> root.side-tab;
                 }
                 Rectangle { height: 6px; }
@@ -1729,13 +1764,22 @@ export component AppWindow inherits SheetWindow {
                             label: @tr("Paper");
                             items: [@tr("Custom"), "A0", "A1", "A2", "A3", "A4", "A5", "A6"];
                             current: root.paper;
-                            selected(i) => { root.paper = i; root.sheet-changed(); }
+                            selected(i) => { root.paper-chosen(i); }
                         }
                     }
-                    if root.paper == 0: Row {
+                    Row {
                         text: @tr("Width × height");
-                        NumberField { text <=> root.custom-w; scrub: 1; step: 1; minimum: 10; unit: "mm"; label: @tr("Width"); invalid: root.invalid == "width"; edited => { root.sheet-changed(); } }
-                        NumberField { text <=> root.custom-h; scrub: 1; step: 1; minimum: 10; unit: "mm"; label: @tr("Height"); invalid: root.invalid == "height"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.custom-w; scrub: root.px-units ? 4 : 1; step: 1; minimum: 10; unit: root.unit; label: @tr("Width"); invalid: root.invalid == "width"; edited => { root.size-edited(); } }
+                        NumberField { text <=> root.custom-h; scrub: root.px-units ? 4 : 1; step: 1; minimum: 10; unit: root.unit; label: @tr("Height"); invalid: root.invalid == "height"; edited => { root.size-edited(); } }
+                    }
+                    Row {
+                        text: @tr("Unit");
+                        Dropdown {
+                            label: @tr("Unit");
+                            items: ["mm", @tr("Pixels")];
+                            current: root.px-units ? 1 : 0;
+                            selected(i) => { root.unit-chosen(i == 1); }
+                        }
                     }
                     Row {
                         text: @tr("Orientation");
@@ -1743,26 +1787,26 @@ export component AppWindow inherits SheetWindow {
                             label: @tr("Orientation");
                             items: [@tr("Portrait"), @tr("Landscape")];
                             current: root.landscape ? 1 : 0;
-                            selected(i) => { root.landscape = i == 1; root.sheet-changed(); }
+                            selected(i) => { root.orientation-chosen(i == 1); }
                         }
                     }
                     Row {
                         text: @tr("Resolution");
-                        NumberField { text <=> root.dpi; scrub: 1; step: 1; minimum: 10; unit: "dpi"; label: @tr("Resolution"); invalid: root.invalid == "dpi"; edited => { root.sheet-changed(); } }
+                        NumberField { text <=> root.dpi; scrub: 1; step: 1; minimum: 10; unit: "dpi"; label: @tr("Resolution"); invalid: root.invalid == "dpi"; edited => { root.size-edited(); } }
                     }
                     Row {
                         text: @tr("Margin");
                         NumberField {
-                            text <=> root.margin; unit: "mm"; label: @tr("Margin"); invalid: root.invalid == "margin";
-                            scrub: 0.5; step: 0.5;
+                            text <=> root.margin; unit: root.unit; label: @tr("Margin"); invalid: root.invalid == "margin";
+                            scrub: root.px-units ? 1 : 0.5; step: 1;
                             edited => { root.sheet-changed(); }
                         }
                     }
                     Row {
                         text: @tr("Gap between stills");
                         NumberField {
-                            text <=> root.gap; unit: "mm"; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
-                            scrub: 0.1; step: 0.1;
+                            text <=> root.gap; unit: root.unit; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
+                            scrub: root.px-units ? 0.5 : 0.1; step: 1;
                             edited => { root.sheet-changed(); }
                         }
                     }
@@ -1807,12 +1851,12 @@ export component AppWindow inherits SheetWindow {
                         Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
                         Row {
                             text: @tr("Thickness");
-                            NumberField { text <=> root.line-width; scrub: 0.02; step: 0.05; minimum: 0.05; unit: "mm"; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
+                            NumberField { text <=> root.line-width; scrub: root.px-units ? 0.2 : 0.05; step: 1; minimum: 1; unit: root.unit; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
                         }
                         Row {
                             text: @tr("Distance from the edge");
                             NumberField {
-                                text <=> root.line-inset; scrub: 0.5; step: 0.5; unit: "mm"; label: @tr("Distance from the edge"); invalid: root.invalid == "line-inset";
+                                text <=> root.line-inset; scrub: root.px-units ? 1 : 0.5; step: 1; unit: root.unit; label: @tr("Distance from the edge"); invalid: root.invalid == "line-inset";
                                 edited => { root.sheet-changed(); }
                             }
                         }
@@ -1860,7 +1904,7 @@ export component AppWindow inherits SheetWindow {
                             text: @tr("Size");
                             StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
                             StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
-                            NumberField { text <=> root.head-size; scrub: 0.5; step: 0.5; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
+                            NumberField { text <=> root.head-size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
                         }
                         ColorRow { text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color"; edited => { root.sheet-changed(); } }
                         HorizontalLayout {
@@ -1877,12 +1921,12 @@ export component AppWindow inherits SheetWindow {
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                    NumberField { text <=> root.head-dx; scrub: 0.5; step: 0.5; minimum: -2000; unit: "mm"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                    NumberField { text <=> root.head-dx; scrub: root.px-units ? 2 : 0.5; step: 1; minimum: -99999; unit: root.unit; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
                                 }
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                    NumberField { text <=> root.head-dy; scrub: 0.5; step: 0.5; minimum: -2000; unit: "mm"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                    NumberField { text <=> root.head-dy; scrub: root.px-units ? 2 : 0.5; step: 1; minimum: -99999; unit: root.unit; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
                                 }
                             }
                         }
@@ -2057,9 +2101,9 @@ export component AppWindow inherits SheetWindow {
                     }
                     moved => {
                         if self.pressed {
-                            let mm = root.page-w-mm / (page.width / 1px);
-                            root.head-dx = Math.round((parent.dx0 + (self.mouse-x - self.pressed-x) / 1px * mm) * 2) / 2;
-                            root.head-dy = Math.round((parent.dy0 + (self.mouse-y - self.pressed-y) / 1px * mm) * 2) / 2;
+                            let per = root.page-w / (page.width / 1px);
+                            root.head-dx = Math.round(parent.dx0 + (self.mouse-x - self.pressed-x) / 1px * per);
+                            root.head-dy = Math.round(parent.dy0 + (self.mouse-y - self.pressed-y) / 1px * per);
                             root.sheet-changed();
                         }
                     }

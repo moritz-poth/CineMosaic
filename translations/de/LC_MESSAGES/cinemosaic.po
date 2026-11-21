@@ -254,8 +254,38 @@ msgstr "Kein Volume mit einem Ordner „Avid MediaFiles“ ist angeschlossen."
 msgid "Grab stills again"
 msgstr "Stills neu holen"
 
+msgid "File"
+msgstr "Ablage"
+
+msgid "New Project"
+msgstr "Neues Projekt"
+
+msgid "Open Project…"
+msgstr "Projekt öffnen…"
+
+msgid "Open Recent"
+msgstr "Zuletzt geöffnet"
+
+msgid "Clear Menu"
+msgstr "Einträge löschen"
+
+msgid "Close Window"
+msgstr "Fenster schließen"
+
+msgid "Save Project"
+msgstr "Projekt sichern"
+
+msgid "Save Project As…"
+msgstr "Projekt sichern unter…"
+
 msgid "Grab {} missing stills"
 msgstr "{} fehlende Stills holen"
+
+msgid "Unit"
+msgstr "Einheit"
+
+msgid "Pixels"
+msgstr "Pixel"
 
 msgid "Grab stills"
 msgstr "Stills holen"
@@ -448,9 +478,6 @@ msgstr "Unten Mitte"
 
 msgid "Bottom right"
 msgstr "Unten rechts"
-
-msgid "Line"
-msgstr "Linie"
 
 msgid "Pattern"
 msgstr "Muster"

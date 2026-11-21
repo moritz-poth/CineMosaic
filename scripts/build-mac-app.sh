@@ -54,6 +54,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleDocumentTypes</key>
+  <array><dict>
+    <key>CFBundleTypeName</key><string>CineMosaic Project</string>
+    <key>CFBundleTypeRole</key><string>Editor</string>
+    <key>LSHandlerRank</key><string>Owner</string>
+    <key>LSTypeIsPackage</key><true/>
+    <key>LSItemContentTypes</key><array><string>io.github.moritz-poth.cinemosaic.project</string></array>
+  </dict></array>
+  <key>UTExportedTypeDeclarations</key>
+  <array><dict>
+    <key>UTTypeIdentifier</key><string>io.github.moritz-poth.cinemosaic.project</string>
+    <key>UTTypeDescription</key><string>CineMosaic Project</string>
+    <key>UTTypeConformsTo</key><array><string>com.apple.package</string></array>
+    <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>cinemosaic</string></array></dict>
+  </dict></array>
   <key>NSHumanReadableCopyright</key><string>© 2026 Moritz Poth. GPL-3.0-or-later.</string>
 </dict>
 </plist>

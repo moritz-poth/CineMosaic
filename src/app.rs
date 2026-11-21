@@ -15,9 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use slint::{ModelRc, SharedString, VecModel};
 use cinemosaic::bin::{BinCut, sequences};
-use cinemosaic::timeline::{Pick, Rate, Shot, Timeline, format_tc};
+use cinemosaic::timeline::{Part, Pick, Rate, Shot, Timeline, format_tc};
 use cinemosaic::report::{self, Outcome, Report};
-use cinemosaic::{Gate, UPDATE_APP, avb, export, frames, grab_stills, layout, log, master_jobs, media, pick, picks, read_cut_list, selftest, update};
+use cinemosaic::{Gate, Job, UPDATE_APP, avb, export, frames, grab_stills, layout, log, master_jobs, media, pick, picks, project, read_cut_list, selftest, update};
 
 /// Long side of the preview image in pixels (twice the on-screen size for Retina).
 const PREVIEW_PX: f64 = 1800.0;
@@ -36,6 +36,15 @@ struct State {
     thumbs: Arc<HashMap<Pick, RgbImage>>,
     /// grabs since the source was chosen: each writes into its own folder
     grabs: usize,
+    /// frames grabbed so far by media file and frame: a changed cut reuses them instead of grabbing again
+    done: HashMap<(PathBuf, i64), PathBuf>,
+    /// the open project and what it held when last saved or opened (to ask before changes get lost)
+    project: Option<PathBuf>,
+    project_saved: Option<serde_json::Value>,
+    /// an opened project's shots and stills, waiting for its source to be read again
+    carry: Option<Carry>,
+    /// this window's preview renderer and the generation of its newest job
+    renderer: std::cell::OnceCell<(std::sync::mpsc::Sender<RenderJob>, Arc<AtomicUsize>)>,
     gate: Arc<Gate>,
     saved: Option<PathBuf>,
     /// bin mode: the bin, the chosen sequence read from it, volumes (switched on or off)
@@ -48,6 +57,18 @@ struct State {
     sequence_names: Vec<String>,
     /// width / height of the grabbed stills (bin mode has no master to ask)
     still_aspect: Option<f64>,
+}
+
+/// What an opened project showed: taken over for the shots that are still the same once the source is read again,
+/// or shown as saved when the source cannot be read.
+struct Carry {
+    shots: Vec<Shot>,
+    stills: HashMap<Pick, Result<PathBuf, String>>,
+    thumbs: HashMap<Pick, RgbImage>,
+    still_aspect: Option<f64>,
+    timeline: Timeline,
+    sequences: usize,
+    info: String,
 }
 
 impl State {
@@ -64,7 +85,30 @@ impl State {
 }
 
 thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
+    /// the project windows, oldest first; each has its own State under its `win-id`
+    static WINDOWS: RefCell<Vec<AppWindow>> = const { RefCell::new(Vec::new()) };
+    static STATES: RefCell<HashMap<i32, Rc<RefCell<State>>>> = RefCell::new(HashMap::new());
+    /// the project window that was in front last (menus of the other windows act on it)
+    static FRONT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
+/// The state of `app`'s window, like `RefCell::with` (a closed window gets a fresh, unused one).
+fn with_state<R>(app: &AppWindow, f: impl FnOnce(&RefCell<State>) -> R) -> R {
+    let rc = STATES.with(|s| s.borrow_mut().entry(app.get_win_id()).or_default().clone());
+    f(&rc)
+}
+
+/// The project window in front, else any.
+fn front_window() -> Option<AppWindow> {
+    let id = FRONT.with(|f| f.get());
+    WINDOWS.with(|w| {
+        let w = w.borrow();
+        w.iter().find(|a| a.get_win_id() == id).or(w.last()).map(|a| a.clone_strong())
+    })
+}
+
+fn all_windows() -> Vec<AppWindow> {
+    WINDOWS.with(|w| w.borrow().iter().map(|a| a.clone_strong()).collect())
 }
 
 /// (code, name in its own language, manual). New language: add it here, in scripts/translations.py and docs/help/<code>.md.
@@ -154,6 +198,7 @@ fn save_settings(s: &Settings) {
 }
 
 fn apply_menus(shared: &Shared, s: &Settings) {
+    show_recent(shared);
     let languages: Vec<MenuChoice> = LANGUAGES.iter().map(|l| MenuChoice { title: l.1.into(), checked: l.0 == s.language }).collect();
     shared.set_languages(ModelRc::new(VecModel::from(languages)));
     shared.set_appearance(ModelRc::new(VecModel::from(vec![s.dark, !s.dark])));
@@ -289,26 +334,24 @@ fn update_help(help: &HelpWindow, s: &Settings) {
     apply_menus(&help.global::<Shared>(), s);
 }
 
-/// Menu of a second window (manual, About, settings) forwards to the main window.
-fn forward_menu(shared: &Shared, weak: &slint::Weak<AppWindow>) {
-    let w = weak.clone();
-    shared.on_select_language(move |i| w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_select_language(i)));
-    let w = weak.clone();
-    shared.on_select_dark(move |d| w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_select_dark(d)));
-    let w = weak.clone();
-    shared.on_select_betas(move |b| w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_select_betas(b)));
-    let w = weak.clone();
-    shared.on_show_help(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_help()));
-    let w = weak.clone();
-    shared.on_show_about(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_about()));
-    let w = weak.clone();
-    shared.on_show_log(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_log()));
-    let w = weak.clone();
-    shared.on_check_update(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_check_update()));
-    let w = weak.clone();
-    shared.on_install_update(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_install_update()));
-    let w = weak.clone();
-    shared.on_show_release(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_release()));
+/// Menu of a second window (manual, About, settings) forwards to the project window in front.
+fn forward_menu(shared: &Shared) {
+    shared.on_select_language(move |i| front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_select_language(i)));
+    shared.on_select_dark(move |d| front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_select_dark(d)));
+    shared.on_select_betas(move |b| front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_select_betas(b)));
+    shared.on_show_help(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_show_help()));
+    shared.on_show_about(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_show_about()));
+    shared.on_show_log(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_show_log()));
+    shared.on_check_update(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_check_update()));
+    shared.on_install_update(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_install_update()));
+    shared.on_show_release(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_show_release()));
+    shared.on_new_project(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_new_project()));
+    shared.on_open_project(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_open_project()));
+    shared.on_open_recent(move |i| front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_open_recent(i)));
+    shared.on_clear_recent(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_clear_recent()));
+    shared.on_save_project(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_save_project()));
+    shared.on_save_project_as(move || front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_save_project_as()));
+    show_recent(shared);
 }
 
 
@@ -483,14 +526,14 @@ fn repaint_soon<T: ComponentHandle + 'static>(c: &T) {
 }
 
 /// Language or appearance changed: every open window follows.
-fn apply_all(app: &AppWindow, others: &Others, s: &Settings) {
-    apply_menus(&app.global::<Shared>(), s);
+fn apply_all(others: &Others, s: &Settings) {
+    all_windows().iter().for_each(|a| apply_menus(&a.global::<Shared>(), s));
     others.settings.borrow().iter().for_each(|w| apply_menus(&w.global::<Shared>(), s));
     others.help.borrow().iter().for_each(|h| update_help(h, s));
     #[cfg(target_os = "macos")]
     {
         // Slint rebuilds the menu after this event; add the item back once that is done
-        let title = app.get_txt_settings_menu().to_string();
+        let title = front_window().map(|a| a.get_txt_settings_menu().to_string()).unwrap_or_default();
         slint::Timer::single_shot(Duration::from_millis(150), move || mac_menu::set_settings_title(&title));
     }
 }
@@ -545,27 +588,99 @@ fn fps_text(fps: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// A decimal number field in `min..=max`; Err = `field`.
+fn num(s: &str, min: f64, max: f64, field: &'static str) -> Result<f64, &'static str> {
+    let v: f64 = s.trim().replace(',', ".").parse().map_err(|_| field)?;
+    if (min..=max).contains(&v) { Ok(v) } else { Err(field) }
+}
+
+/// A whole-number field (lengths, margin, sizes); Err = `field`.
+fn whole(s: &str, field: &'static str) -> Result<f64, &'static str> {
+    s.trim().parse::<i64>().map(|v| v as f64).map_err(|_| field)
+}
+
+/// A length field in mm, from mm or px (`per` = mm per unit), in `min..=max` mm.
+fn length(s: &str, per: f64, min: f64, max: f64, field: &'static str) -> Result<f64, &'static str> {
+    let v = whole(s, field)? * per;
+    if (min..=max).contains(&v) { Ok(v) } else { Err(field) }
+}
+
+/// mm per unit of the length fields: 1 in mm, 25.4 / dpi in px (an unusable dpi counts as 300).
+fn mm_per_unit(app: &AppWindow) -> f64 {
+    if app.get_px_units() { 25.4 / num(&app.get_dpi(), 10.0, 1200.0, "dpi").unwrap_or(300.0) } else { 1.0 }
+}
+
+/// `mm` as a whole number in the unit of the length fields.
+fn in_unit(mm: f64, per: f64) -> SharedString {
+    format!("{}", (mm / per).round() as i64).into()
+}
+
 /// Reads the sheet fields; Err = name of the first field that is not a usable number.
 fn read_sheet(app: &AppWindow) -> Result<layout::Sheet, &'static str> {
-    fn num(s: &str, min: f64, max: f64, field: &'static str) -> Result<f64, &'static str> {
-        let v: f64 = s.trim().replace(',', ".").parse().map_err(|_| field)?;
-        if (min..=max).contains(&v) { Ok(v) } else { Err(field) }
-    }
-    let (mut w, mut h) = match app.get_paper() as usize {
-        0 => (num(&app.get_custom_w(), 10.0, 5000.0, "width")?, num(&app.get_custom_h(), 10.0, 5000.0, "height")?),
-        i => {
-            let d = layout::DIN[(i - 1).min(layout::DIN.len() - 1)];
-            (d.1, d.2)
-        }
-    };
-    if app.get_landscape() != (w > h) && w != h {
-        (w, h) = (h, w);
-    }
     let dpi = num(&app.get_dpi(), 10.0, 1200.0, "dpi")?;
-    let margin = num(&app.get_margin(), 0.0, w.min(h) / 2.0 - 1.0, "margin")?;
-    let gap = num(&app.get_gap(), 0.0, 500.0, "gap")?;
+    let per = if app.get_px_units() { 25.4 / dpi } else { 1.0 };
+    let w = length(&app.get_custom_w(), per, 10.0, 5000.0, "width")?;
+    let h = length(&app.get_custom_h(), per, 10.0, 5000.0, "height")?;
+    let margin = length(&app.get_margin(), per, 0.0, w.min(h) / 2.0 - 1.0, "margin")?;
+    let gap = length(&app.get_gap(), per, 0.0, 500.0, "gap")?;
     let columns = if app.get_auto_cols() { None } else { Some(num(&app.get_cols(), 1.0, 1000.0, "columns")? as u32) };
     Ok(layout::Sheet { width_mm: w, height_mm: h, dpi, margin_mm: margin, gap_mm: gap, columns, ..Default::default() })
+}
+
+/// Paper from the list (1.. = A0..A6): its size into width × height, in the orientation and unit chosen.
+fn show_paper(app: &AppWindow) {
+    let Some(d) = (app.get_paper() as usize).checked_sub(1).and_then(|i| layout::DIN.get(i)) else { return };
+    let (short, long) = (d.1.min(d.2), d.1.max(d.2));
+    let (w, h) = if app.get_landscape() { (long, short) } else { (short, long) };
+    let per = mm_per_unit(app);
+    app.set_custom_w(in_unit(w, per));
+    app.set_custom_h(in_unit(h, per));
+}
+
+/// Width × height typed or dragged: orientation follows, and the paper list shows the A size it matches or Custom.
+fn size_edited(app: &AppWindow) {
+    let per = mm_per_unit(app);
+    if let (Ok(w), Ok(h)) = (whole(&app.get_custom_w(), ""), whole(&app.get_custom_h(), "")) {
+        let (w, h) = (w * per, h * per);
+        if w != h {
+            app.set_landscape(w > h);
+        }
+        // within 0.6 mm: px sizes are rounded
+        let near = |a: f64, b: f64| (a - b).abs() < 0.6;
+        let a_size = layout::DIN.iter().position(|d| near(d.1.min(d.2), w.min(h)) && near(d.1.max(d.2), w.max(h)));
+        app.set_paper(a_size.map_or(0, |i| i as i32 + 1));
+    }
+    refresh(app);
+}
+
+type Getter = fn(&AppWindow) -> SharedString;
+type Setter = fn(&AppWindow, SharedString);
+
+/// Every length field into the other unit, rounded to whole numbers.
+fn switch_unit(app: &AppWindow, px: bool) {
+    if app.get_px_units() == px {
+        return;
+    }
+    let old = mm_per_unit(app);
+    app.set_px_units(px);
+    let new = mm_per_unit(app);
+    let fields: [(Getter, Setter, f64); 8] = [
+        (AppWindow::get_custom_w, AppWindow::set_custom_w, 1.0),
+        (AppWindow::get_custom_h, AppWindow::set_custom_h, 1.0),
+        (AppWindow::get_margin, AppWindow::set_margin, 0.0),
+        (AppWindow::get_gap, AppWindow::set_gap, 0.0),
+        (AppWindow::get_line_width, AppWindow::set_line_width, 1.0),
+        (AppWindow::get_line_inset, AppWindow::set_line_inset, 0.0),
+        (AppWindow::get_head_dx, AppWindow::set_head_dx, f64::MIN),
+        (AppWindow::get_head_dy, AppWindow::set_head_dy, f64::MIN),
+    ];
+    for (get, set, least) in fields {
+        // an unusable value stays as typed (and red)
+        if let Ok(v) = num(&get(app), f64::MIN, f64::MAX, "") {
+            set(app, format!("{}", (v * old / new).round().max(least) as i64).into());
+        }
+    }
+    show_paper(app); // an A size exactly, not a rounded conversion
 }
 
 /// "#rrggbb", "rrggbb" or "#rgb" → colour.
@@ -588,19 +703,16 @@ thread_local! {
 /// Trim area, frame line and headline from the Design tab and the crop-marks switch; Err = the field that is not
 /// usable. `aspect` is the picture format the trim area takes.
 fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result<(), &'static str> {
-    let num = |s: &str, min: f64, max: f64, field: &'static str| -> Result<f64, &'static str> {
-        let v: f64 = s.trim().replace(',', ".").parse().map_err(|_| field)?;
-        if (min..=max).contains(&v) { Ok(v) } else { Err(field) }
-    };
+    let per = if app.get_px_units() { 25.4 / sheet.dpi } else { 1.0 };
     sheet.trim = app.get_trim().then_some(aspect);
     let line_color = hex_color(&app.get_line_color());
     if let Some([r, g, b]) = line_color {
         app.set_line_swatch(slint::Color::from_rgb_u8(r, g, b));
     }
-    let inset = num(&app.get_line_inset(), 0.0, 200.0, "line-inset")?;
+    let inset = length(&app.get_line_inset(), per, 0.0, 200.0, "line-inset")?;
     sheet.line = if app.get_line_on() {
         Some(layout::Line {
-            width_mm: num(&app.get_line_width(), 0.05, 20.0, "line-width")?,
+            width_mm: length(&app.get_line_width(), per, 0.05, 20.0, "line-width")?,
             inset_mm: inset,
             color: line_color.ok_or("line-color")?,
             pattern: layout::Pattern::ALL[(app.get_line_pattern().max(0) as usize).min(layout::Pattern::ALL.len() - 1)],
@@ -615,7 +727,7 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
     }
     sheet.headline = None;
     if !text.trim().is_empty() {
-        let size = num(&app.get_head_size(), 2.0, 1000.0, "head-size")?;
+        let size = whole(&app.get_head_size(), "head-size").and_then(|v| if (2.0..=1000.0).contains(&v) { Ok(v) } else { Err("head-size") })?;
         let color = head_color.ok_or("head-color")?;
         let family = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned());
         let (bold, italic) = (app.get_head_bold(), app.get_head_italic());
@@ -626,8 +738,8 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
             let anchor = app.get_head_anchor().clamp(0, 8);
             let align = [layout::Align::Left, layout::Align::Center, layout::Align::Right][anchor as usize % 3];
             let valign = [layout::VAlign::Top, layout::VAlign::Middle, layout::VAlign::Bottom][anchor as usize / 3];
-            let dx_mm = num(&app.get_head_dx(), -2000.0, 2000.0, "head-dx")?;
-            let dy_mm = num(&app.get_head_dy(), -2000.0, 2000.0, "head-dy")?;
+            let dx_mm = length(&app.get_head_dx(), per, -2000.0, 2000.0, "head-dx")?;
+            let dy_mm = length(&app.get_head_dy(), per, -2000.0, 2000.0, "head-dy")?;
             sheet.headline = Some(layout::Headline { text, face, size_pt: size, color, align, valign, dx_mm, dy_mm });
         }
     }
@@ -638,26 +750,34 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
 fn read_all(app: &AppWindow) -> Result<(layout::Sheet, Option<f64>), &'static str> {
     let mut sheet = read_sheet(app)?;
     let picture = read_picture(app)?;
-    let aspect = picture.unwrap_or_else(|| STATE.with(|st| st.borrow().frame_aspect()));
+    let aspect = picture.unwrap_or_else(|| with_state(app, |st| st.borrow().frame_aspect()));
     read_decor(app, &mut sheet, aspect)?;
     Ok((sheet, picture))
 }
 
 /// Loads the installed font families in a thread (that takes a moment) and fills the Font menu; Helvetica Neue first
 /// choice, like the apps' headlines.
-fn load_fonts(app: &AppWindow) {
-    let weak = app.as_weak();
+fn load_fonts() {
     std::thread::spawn(move || {
         let names = cinemosaic::fonts::families();
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(app) = weak.upgrade() else { return };
-            let pick = ["Helvetica Neue", "Helvetica", "Arial"].iter().find_map(|w| names.iter().position(|n| n == w)).unwrap_or(0);
-            let model: Vec<SharedString> = names.iter().map(|n| n.as_str().into()).collect();
-            app.set_fonts(ModelRc::new(VecModel::from(model)));
-            app.set_font(pick as i32);
             FONTS.with(|f| *f.borrow_mut() = names);
-            refresh(&app);
+            for app in all_windows() {
+                show_fonts(&app);
+                refresh(&app);
+            }
         });
+    });
+}
+
+/// The font list of a window, Helvetica Neue chosen (nothing while the fonts are still loading).
+fn show_fonts(app: &AppWindow) {
+    FONTS.with(|f| {
+        let names = f.borrow();
+        let pick = ["Helvetica Neue", "Helvetica", "Arial"].iter().find_map(|w| names.iter().position(|n| n == w)).unwrap_or(0);
+        let model: Vec<SharedString> = names.iter().map(|n| n.as_str().into()).collect();
+        app.set_fonts(ModelRc::new(VecModel::from(model)));
+        app.set_font(pick as i32);
     });
 }
 
@@ -671,7 +791,7 @@ fn presets_path() -> Option<PathBuf> {
 }
 
 /// Reads presets.json (a missing or broken file = no presets) and fills the menu.
-fn show_presets(app: &AppWindow) {
+fn load_presets() {
     let list: Vec<(String, serde_json::Value)> = presets_path()
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice::<Vec<serde_json::Value>>(&b).ok())
@@ -680,12 +800,15 @@ fn show_presets(app: &AppWindow) {
         .filter_map(|e| Some((e.get("name")?.as_str()?.to_string(), e.get("values")?.clone())))
         .collect();
     PRESETS.with(|p| *p.borrow_mut() = list);
-    preset_menu(app);
 }
 
-fn preset_menu(app: &AppWindow) {
+/// The preset menu in every window.
+// shortcut: another window's chosen preset index is not moved when a preset is added or deleted elsewhere
+fn preset_menu(_app: &AppWindow) {
     let model: Vec<SharedString> = PRESETS.with(|p| p.borrow().iter().map(|e| e.0.as_str().into()).collect());
-    app.set_presets(ModelRc::new(VecModel::from(model)));
+    for a in all_windows() {
+        a.set_presets(ModelRc::new(VecModel::from(model.clone())));
+    }
 }
 
 /// Writes all presets atomically and refreshes the menu; `status` is the line under it when saving works.
@@ -713,7 +836,7 @@ fn store_presets(app: &AppWindow, status: String) {
 fn preset_json(app: &AppWindow) -> serde_json::Value {
     let font = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned()).unwrap_or_default();
     serde_json::json!({
-        "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
+        "px-units": app.get_px_units(), "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
         "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
         "picture": app.get_picture(), "custom-aspect": app.get_custom_aspect().as_str(), "trim": app.get_trim(),
@@ -735,6 +858,7 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     };
     let boolean = |k: &str, set: &dyn Fn(bool)| v.get(k).and_then(|x| x.as_bool()).into_iter().for_each(set);
     let text = |k: &str, set: &dyn Fn(SharedString)| v.get(k).and_then(|x| x.as_str()).filter(|s| s.len() < 100).into_iter().for_each(|s| set(s.into()));
+    boolean("px-units", &|b| app.set_px_units(b));
     int("paper", layout::DIN.len() as i64, &|n| app.set_paper(n));
     text("custom-w", &|s| app.set_custom_w(s));
     text("custom-h", &|s| app.set_custom_h(s));
@@ -765,6 +889,34 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("head-dx", &|s| app.set_head_dx(s));
     text("head-dy", &|s| app.set_head_dy(s));
     int("export-format", 3, &|n| app.set_export_format(n));
+    // presets from before whole numbers: round
+    for (get, set) in [
+        (AppWindow::get_margin as Getter, AppWindow::set_margin as Setter),
+        (AppWindow::get_gap, AppWindow::set_gap),
+        (AppWindow::get_line_inset, AppWindow::set_line_inset),
+        (AppWindow::get_head_size, AppWindow::set_head_size),
+        (AppWindow::get_head_dx, AppWindow::set_head_dx),
+        (AppWindow::get_head_dy, AppWindow::set_head_dy),
+    ] {
+        if let Ok(v) = num(&get(app), f64::MIN, f64::MAX, "") {
+            set(app, format!("{}", v.round() as i64).into());
+        }
+    }
+    if let Ok(v) = num(&app.get_line_width(), f64::MIN, f64::MAX, "") {
+        app.set_line_width(format!("{}", v.round().max(1.0) as i64).into());
+    }
+    // the fields show the size: an A size from the list, a custom one turned to the orientation (older presets
+    // kept it unturned)
+    if app.get_paper() > 0 {
+        show_paper(app);
+    } else if let (Ok(w), Ok(h)) = (whole(&app.get_custom_w(), ""), whole(&app.get_custom_h(), ""))
+        && w != h
+        && (w > h) != app.get_landscape()
+    {
+        let (cw, ch) = (app.get_custom_w(), app.get_custom_h());
+        app.set_custom_w(ch);
+        app.set_custom_h(cw);
+    }
 }
 
 /// Picture format to crop to: None = full frame; Err = the custom field is not a format.
@@ -797,7 +949,7 @@ fn refresh(app: &AppWindow) {
     };
     app.set_invalid("".into());
     app.set_page_aspect((sheet.width_mm / sheet.height_mm) as f32);
-    STATE.with(|st| {
+    with_state(app, |st| {
         let st = st.borrow();
         let picks = st.picks(&sheet, picture);
         let n = picks.len();
@@ -806,18 +958,19 @@ fn refresh(app: &AppWindow) {
         app.set_missing(missing as i32);
         let aspect = picture.unwrap_or(st.frame_aspect());
         let (w, h) = sheet.size_px();
-        let mut info = format!("{w} × {h} px");
+        // the sheet's own size stands in width × height
+        let mut info = String::new();
         if n > 0 {
             let g = sheet.grid(n, aspect);
-            info = format!("{} × {} · {info} · {} {} × {} px", g.cols, g.rows, tr(["still", "Still", "image", "fotograma"]), g.cell_w.round(), g.cell_h.round());
+            info = format!("{} × {} · {} {} × {} px", g.cols, g.rows, tr(["still", "Still", "image", "fotograma"]), g.cell_w.round(), g.cell_h.round());
         }
         let gb = w as f64 * h as f64 * 3.0 / 1e9;
         if gb >= 1.0 {
             info += &tr([" · needs about {} GB of memory to save", " · Speichern braucht etwa {} GB Arbeitsspeicher", " · l’enregistrement demande environ {} Go de mémoire", " · guardar necesita unos {} GB de memoria"]).replace("{}", &format!("{gb:.1}"));
         }
-        app.set_sheet_info(info.into());
+        app.set_sheet_info(info.trim_start_matches(" · ").into());
         // where the headline is, for dragging it in the preview
-        app.set_page_w_mm(sheet.width_mm as f32);
+        app.set_page_w((sheet.width_mm / if app.get_px_units() { 25.4 / sheet.dpi } else { 1.0 }) as f32);
         match sheet.plan().text {
             Some((r, _, _)) => {
                 app.set_head_bx((r.x / w as f64) as f32);
@@ -832,16 +985,12 @@ fn refresh(app: &AppWindow) {
         let long = (PREVIEW_PX * app.get_zoom() as f64).min(real).clamp(PREVIEW_PX, 8000.0);
         let mut small = sheet.clone();
         small.dpi = long / (sheet.width_mm.max(sheet.height_mm) / 25.4);
-        let job = RenderJob { sheet: small, picks, aspect, picture, thumbs: st.thumbs.clone(), generation: RENDER_GEN.fetch_add(1, Ordering::Relaxed) + 1 };
-        RENDERER.with(|r| {
-            let mut r = r.borrow_mut();
-            if r.is_none() {
-                *r = Some(start_renderer(app.as_weak()));
-            }
-            if let Some(tx) = r.as_ref() {
-                let _ = tx.send(job);
-            }
+        let (tx, latest) = st.renderer.get_or_init(|| {
+            let latest = Arc::new(AtomicUsize::new(0));
+            (start_renderer(app.as_weak(), latest.clone()), latest)
         });
+        let job = RenderJob { sheet: small, picks, aspect, picture, thumbs: st.thumbs.clone(), generation: latest.fetch_add(1, Ordering::Relaxed) + 1 };
+        let _ = tx.send(job);
     });
 }
 
@@ -855,15 +1004,11 @@ struct RenderJob {
     generation: usize,
 }
 
-static RENDER_GEN: AtomicUsize = AtomicUsize::new(0);
 
-thread_local! {
-    static RENDERER: RefCell<Option<std::sync::mpsc::Sender<RenderJob>>> = const { RefCell::new(None) };
-}
 
 /// The preview is drawn off the UI thread, so sliders and zoom never wait for it; jobs that piled up while it was
 /// drawing are skipped up to the newest.
-fn start_renderer(weak: slint::Weak<AppWindow>) -> std::sync::mpsc::Sender<RenderJob> {
+fn start_renderer(weak: slint::Weak<AppWindow>, latest: Arc<AtomicUsize>) -> std::sync::mpsc::Sender<RenderJob> {
     let (tx, rx) = std::sync::mpsc::channel::<RenderJob>();
     std::thread::spawn(move || {
         while let Ok(mut job) = rx.recv() {
@@ -871,14 +1016,14 @@ fn start_renderer(weak: slint::Weak<AppWindow>) -> std::sync::mpsc::Sender<Rende
                 job = newer;
             }
             let page = layout::render(&job.sheet, job.picks.len(), job.aspect, |i| job.thumbs.get(&job.picks[i]).map(|t| cropped(t.clone(), job.picture)));
-            if job.generation != RENDER_GEN.load(Ordering::Relaxed) {
+            if job.generation != latest.load(Ordering::Relaxed) {
                 continue; // a newer one is waiting
             }
             let buffer = SharedPixelBuffer::<Rgb8Pixel>::clone_from_slice(page.as_raw(), page.width(), page.height());
-            let weak = weak.clone();
+            let (weak, latest) = (weak.clone(), latest.clone());
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(app) = weak.upgrade()
-                    && job.generation == RENDER_GEN.load(Ordering::Relaxed)
+                    && job.generation == latest.load(Ordering::Relaxed)
                 {
                     app.set_preview(Image::from_rgb8(buffer));
                 }
@@ -927,10 +1072,10 @@ fn describe(t: &Timeline, shots: &[Shot], sequences: usize) -> String {
 
 /// Master and cut list both chosen: read the list and show what it holds.
 fn load_source(app: &AppWindow) {
-    STATE.with(|st| {
+    with_state(app, |st| {
         let mut st = st.borrow_mut();
         clear_source(app, &mut st);
-        let (Some((_, info)), Some(list)) = (st.master.clone(), st.list.clone()) else { return };
+        let (Some((_, info)), Some(list)) = (st.master.clone(), st.list.clone()) else { return adopt_carry(app, &mut st) };
         match read_cut_list(&list, info.rate) {
             Ok(t) => {
                 let shots = t.shots();
@@ -952,6 +1097,7 @@ fn load_source(app: &AppWindow) {
             }
             Err(e) => app.set_source_error(e.into()),
         }
+        adopt_carry(app, &mut st);
     });
     refresh(app);
 }
@@ -971,7 +1117,7 @@ fn time_left(start: Instant, done: usize, total: usize) -> String {
 /// Grabs the stills the sheet needs that are not there yet; when none are missing, all of them again.
 fn grab(app: &AppWindow) {
     let Ok((sheet, picture)) = read_all(app) else { return };
-    let (shots, wanted, fresh, master, cut, volumes, rate, gate, dir) = STATE.with(|st| {
+    let (shots, wanted, fresh, master, cut, volumes, rate, gate, dir, done) = with_state(app, |st| {
         let mut st = st.borrow_mut();
         let all = st.picks(&sheet, picture);
         let missing: Vec<Pick> = all.iter().filter(|p| !st.stills.contains_key(p)).copied().collect();
@@ -980,12 +1126,15 @@ fn grab(app: &AppWindow) {
             st.stills.clear();
             st.thumbs = Arc::default();
             st.still_aspect = None;
+            st.done.clear();
         }
         st.gate = Arc::default();
         st.grabs += 1;
         let volumes: Vec<PathBuf> = st.volumes.iter().filter(|v| v.1).map(|v| v.0.clone()).collect();
-        let dir = cache_dir().join(format!("grab-{}", st.grabs));
-        (st.shots.clone(), if fresh { all } else { missing }, fresh, st.master.clone(), st.cut.clone(), volumes, st.rate(), st.gate.clone(), dir)
+        // each window its own folder: grabbing everything again empties only its own
+        let base = cache_dir().join(format!("window-{}", app.get_win_id()));
+        let dir = base.join(format!("grab-{}", st.grabs));
+        (st.shots.clone(), if fresh { all } else { missing }, fresh, st.master.clone(), st.cut.clone(), volumes, st.rate(), st.gate.clone(), (base, dir), st.done.clone())
     });
     let bin_mode = app.get_mode() == 1;
     if (bin_mode && cut.is_none()) || (!bin_mode && master.is_none()) {
@@ -1008,7 +1157,7 @@ fn grab(app: &AppWindow) {
             _ => return,
         };
         if fresh {
-            let _ = std::fs::remove_dir_all(cache_dir()); // stills of an earlier run
+            let _ = std::fs::remove_dir_all(&dir.0); // stills of an earlier run
         }
         let start = Instant::now();
         let progress = |done: usize, total: usize| {
@@ -1021,7 +1170,23 @@ fn grab(app: &AppWindow) {
                 }
             });
         };
-        let stills = if gate.cancel.load(Ordering::Relaxed) { None } else { grab_stills(&jobs, &dir, &gate, &progress) };
+        // a frame grabbed before (same media file and frame, e.g. a shot that only moved in the cut) is not grabbed again
+        let reuse: Vec<Option<PathBuf>> = jobs
+            .iter()
+            .map(|j| j.as_ref().ok().and_then(|j| done.get(&(j.file.clone(), j.frame))).filter(|p| p.is_file()).cloned())
+            .collect();
+        let to_grab: Vec<Result<Job, String>> = jobs.iter().zip(&reuse).filter(|(_, r)| r.is_none()).map(|(j, _)| j.clone()).collect();
+        let grabbed = if gate.cancel.load(Ordering::Relaxed) { None } else { grab_stills(&to_grab, &dir.1, &gate, &progress) };
+        let stills: Option<Vec<Result<PathBuf, String>>> = grabbed.map(|g| {
+            let mut g = g.into_iter();
+            reuse.into_iter().map(|r| r.map(Ok).unwrap_or_else(|| g.next().unwrap_or_else(|| Err("not read".into())))).collect()
+        });
+        let new_done: Vec<((PathBuf, i64), PathBuf)> = stills
+            .iter()
+            .flatten()
+            .zip(&jobs)
+            .filter_map(|(r, j)| Some(((j.as_ref().ok()?.file.clone(), j.as_ref().ok()?.frame), r.as_ref().ok()?.clone())))
+            .collect();
         let thumbs = stills.as_ref().map(|s| thumbnails(s, &gate));
         let still_aspect = stills.iter().flatten().find_map(|r| r.as_ref().ok().and_then(|p| image::image_dimensions(p).ok())).map(|(w, h)| w as f64 / h as f64);
         let weak = weak.clone();
@@ -1042,18 +1207,19 @@ fn grab(app: &AppWindow) {
                                 .into(),
                         );
                     }
-                    STATE.with(|st| {
+                    with_state(&app, |st| {
                         let mut st = st.borrow_mut();
                         let mut all = (*st.thumbs).clone();
                         all.extend(wanted.iter().zip(thumbs).filter_map(|(p, t)| Some((*p, t?))));
                         st.thumbs = Arc::new(all);
                         st.stills.extend(wanted.iter().copied().zip(stills));
+                        st.done.extend(new_done);
                         st.still_aspect = st.still_aspect.or(still_aspect);
                     });
                     app.set_state(2);
                 }
                 // cancelled: the stills of earlier grabs stay
-                _ => app.set_state(if STATE.with(|st| st.borrow().stills.is_empty()) { 0 } else { 2 }),
+                _ => app.set_state(if with_state(&app, |st| st.borrow().stills.is_empty()) { 0 } else { 2 }),
             }
             refresh(&app);
         });
@@ -1062,13 +1228,16 @@ fn grab(app: &AppWindow) {
 
 /// Bin mode: reads sequence `index` of the chosen bin in a thread (the project's other bins may be needed).
 fn load_bin(app: &AppWindow, index: usize) {
-    let (path, gate) = STATE.with(|st| {
+    let (path, gate) = with_state(app, |st| {
         let mut st = st.borrow_mut();
         clear_source(app, &mut st);
         st.gate = Arc::default();
         (st.bin.clone(), st.gate.clone())
     });
-    let Some(path) = path else { return refresh(app) };
+    let Some(path) = path else {
+        with_state(app, |st| adopt_carry(app, &mut st.borrow_mut()));
+        return refresh(app);
+    };
     app.set_sequence(index as i32);
     app.set_state(1);
     app.set_paused(false);
@@ -1100,7 +1269,7 @@ fn load_bin(app: &AppWindow, index: usize) {
                         app.set_source_info(describe(&timeline, &shots, sequences).into());
                         app.set_can_grab(true);
                     }
-                    STATE.with(|st| {
+                    with_state(&app, |st| {
                         let mut st = st.borrow_mut();
                         st.shots = shots;
                         st.timeline = Some(timeline);
@@ -1111,6 +1280,7 @@ fn load_bin(app: &AppWindow, index: usize) {
                 Err(e) if e == "cancelled" => {}
                 Err(e) => app.set_source_error(e.into()),
             }
+            with_state(&app, |st| adopt_carry(&app, &mut st.borrow_mut()));
             refresh(&app);
         });
     });
@@ -1118,7 +1288,7 @@ fn load_bin(app: &AppWindow, index: usize) {
 
 /// Volumes with Avid MediaFiles: new ones switched on, the user's choice kept for the others.
 fn sync_volumes(app: &AppWindow) {
-    STATE.with(|st| {
+    with_state(app, |st| {
         let mut st = st.borrow_mut();
         let now = media::volumes();
         let old = std::mem::take(&mut st.volumes);
@@ -1164,7 +1334,7 @@ fn thumbnails(stills: &[Result<PathBuf, String>], gate: &Gate) -> Option<Vec<Opt
 fn save(app: &AppWindow) {
     let Ok((sheet, picture)) = read_all(app) else { return };
     let format = export::Format::ALL[app.get_export_format() as usize % 4];
-    let (stills, aspect, name) = STATE.with(|st| {
+    let (stills, aspect, name) = with_state(app, |st| {
         let st = st.borrow();
         let name = st.timeline.as_ref().map(|t| t.name.trim().to_string()).filter(|n| !n.is_empty());
         let name = name.or_else(|| st.list.as_ref().or(st.bin.as_ref()).and_then(|l| l.file_stem()).map(|s| s.to_string_lossy().into_owned()));
@@ -1194,7 +1364,7 @@ fn save(app: &AppWindow) {
                 Ok(()) => {
                     app.set_export_status(tr(["Saved: {}", "Gespeichert: {}", "Enregistré : {}", "Guardado: {}"]).replace("{}", &file_name(&path)).into());
                     app.set_can_reveal(true);
-                    STATE.with(|st| st.borrow_mut().saved = Some(path));
+                    with_state(&app, |st| st.borrow_mut().saved = Some(path));
                 }
                 Err(e) => app.set_export_status(tr(["Could not save: {}", "Speichern fehlgeschlagen: {}", "Impossible d’enregistrer : {}", "No se pudo guardar: {}"]).replace("{}", &e).into()),
             }
@@ -1202,175 +1372,603 @@ fn save(app: &AppWindow) {
     });
 }
 
+/// After the source of an opened project was read (or could not be): shots that are still the same keep their
+/// stills – the others show grey until "Grab N missing stills"; unreadable source = the project as it was saved.
+fn adopt_carry(app: &AppWindow, st: &mut State) {
+    let Some(c) = st.carry.take() else { return };
+    if st.shots.is_empty() {
+        let msg = app.get_source_error();
+        st.shots = c.shots;
+        st.stills = c.stills;
+        st.thumbs = Arc::new(c.thumbs);
+        st.timeline = Some(c.timeline);
+        st.sequences = c.sequences;
+        app.set_source_info(c.info.into());
+        app.set_can_grab(false);
+        let why = tr(["The source could not be read again – the project shows its saved stills; grabbing needs the source.", "Die Quelle ließ sich nicht wieder lesen – das Projekt zeigt seine gesicherten Stills; zum Holen braucht es die Quelle.", "La source n’a pas pu être relue – le projet montre ses images enregistrées ; la récupération demande la source.", "No se pudo volver a leer el origen: el proyecto muestra sus fotogramas guardados; para capturar hace falta el origen."]);
+        app.set_source_error(if msg.is_empty() { why } else { format!("{why} ({msg})") }.into());
+    } else {
+        let mut stills = HashMap::new();
+        let mut thumbs = HashMap::new();
+        for (j, shot) in st.shots.iter().enumerate() {
+            let Some(i) = c.shots.iter().position(|o| o == shot) else { continue };
+            for part in [Part::Middle, Part::FirstThird, Part::SecondThird] {
+                if let Some(r) = c.stills.get(&(i, part)) {
+                    stills.insert((j, part), r.clone());
+                }
+                if let Some(t) = c.thumbs.get(&(i, part)) {
+                    thumbs.insert((j, part), t.clone());
+                }
+            }
+        }
+        st.stills = stills;
+        st.thumbs = Arc::new(thumbs);
+    }
+    st.still_aspect = st.still_aspect.or(c.still_aspect);
+    if !st.stills.is_empty() {
+        app.set_state(2);
+    }
+    // what is shown now counts as the saved state
+    st.project_saved = Some(snapshot(app, st));
+}
+
+/// What a project would save, without file places: compared to tell whether there are unsaved changes.
+fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
+    serde_json::json!({
+        "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
+        "master": st.master.as_ref().map(|m| m.0.clone()), "list": st.list, "bin": st.bin, "sequence": app.get_sequence(),
+        "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
+    })
+}
+
+/// Unsaved work: grabbed stills without a project, or a project changed since saving.
+fn unsaved(app: &AppWindow) -> bool {
+    with_state(app, |st| {
+        let st = st.borrow();
+        match &st.project {
+            None => !st.stills.is_empty(),
+            Some(_) => st.project_saved.as_ref() != Some(&snapshot(app, &st)),
+        }
+    })
+}
+
+/// Before the sheet is replaced or the app quits: Save / Don't Save / Cancel. false = stop.
+fn may_discard(app: &AppWindow) -> bool {
+    if !unsaved(app) {
+        return true;
+    }
+    let save = tr(["Save", "Sichern", "Enregistrer", "Guardar"]);
+    let answer = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title(tr(["Unsaved changes", "Ungesicherte Änderungen", "Modifications non enregistrées", "Cambios sin guardar"]))
+        .set_description(tr(["Do you want to save the changes to this project?", "Möchtest du die Änderungen an diesem Projekt sichern?", "Voulez-vous enregistrer les modifications de ce projet ?", "¿Quieres guardar los cambios de este proyecto?"]))
+        .set_buttons(rfd::MessageButtons::YesNoCancelCustom(save.clone(), tr(["Don’t Save", "Nicht sichern", "Ne pas enregistrer", "No guardar"]), tr(["Cancel", "Abbrechen", "Annuler", "Cancelar"])))
+        .show();
+    match answer {
+        rfd::MessageDialogResult::Custom(s) if s == save => save_project(app, false),
+        rfd::MessageDialogResult::Yes => save_project(app, false),
+        rfd::MessageDialogResult::Custom(s) if s == tr(["Don’t Save", "Nicht sichern", "Ne pas enregistrer", "No guardar"]) => true,
+        rfd::MessageDialogResult::No => true,
+        _ => false,
+    }
+}
+
+fn error_dialog(text: &str) {
+    rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("CineMosaic").set_description(text).show();
+}
+
+fn part_order(p: Part) -> u8 {
+    match p {
+        Part::Middle => 0,
+        Part::FirstThird => 1,
+        Part::SecondThird => 2,
+    }
+}
+
+/// Saves the project (asks where for a new one or with `ask`); false = not saved.
+// shortcut: copies the stills on the UI thread (instant on the same APFS volume, slower elsewhere); move to a thread
+// with progress if saving to other volumes turns out slow
+fn save_project(app: &AppWindow, ask: bool) -> bool {
+    let current = with_state(app, |st| st.borrow().project.clone());
+    let path = match current.filter(|_| !ask) {
+        Some(p) => p,
+        None => {
+            let name = with_state(app, |st| st.borrow().timeline.as_ref().map(|t| t.name.trim().to_string()).filter(|n| !n.is_empty()));
+            let name = name.unwrap_or_else(|| "CineMosaic".into()).replace(['/', ':'], "-");
+            let Some(p) = rfd::FileDialog::new()
+                .set_title(tr(["Save project", "Projekt sichern", "Enregistrer le projet", "Guardar el proyecto"]))
+                .set_file_name(format!("{name}.{}", project::EXT))
+                .add_filter("CineMosaic", &[project::EXT])
+                .save_file()
+            else {
+                return false;
+            };
+            if p.extension().is_some_and(|e| e == project::EXT) { p } else { p.with_extension(project::EXT) }
+        }
+    };
+    let p = with_state(app, |st| {
+        let st = st.borrow();
+        let by_file: HashMap<&PathBuf, &(PathBuf, i64)> = st.done.iter().map(|(job, file)| (file, job)).collect();
+        let mut stills: Vec<project::Still> = st
+            .stills
+            .iter()
+            .map(|(&(shot, part), r)| project::Still { shot, part, file: r.clone(), job: r.as_ref().ok().and_then(|f| by_file.get(f)).map(|j| (*j).clone()) })
+            .collect();
+        stills.sort_by_key(|s| (s.shot, part_order(s.part)));
+        let t = st.timeline.clone().unwrap_or(Timeline { name: String::new(), rate: st.rate(), tracks: vec![] });
+        project::Project {
+            mode: app.get_mode(),
+            master: st.master.as_ref().map(|m| m.0.clone()),
+            list: st.list.clone(),
+            bin: st.bin.clone(),
+            sequence: app.get_sequence(),
+            volumes_off: st.volumes.iter().filter(|v| !v.1).map(|v| v.0.clone()).collect(),
+            look: preset_json(app),
+            headline: app.get_headline().to_string(),
+            name: t.name,
+            rate: t.rate,
+            sequences: st.sequences,
+            source_info: app.get_source_info().to_string(),
+            shots: st.shots.clone(),
+            still_aspect: st.still_aspect,
+            stills,
+        }
+    });
+    match project::save(&p, &path) {
+        Ok(saved) => {
+            with_state(app, |st| {
+                let mut st = st.borrow_mut();
+                // the stills now live in the package (an overwritten package's old files are gone)
+                for s in saved {
+                    if let (Ok(f), Some(job)) = (&s.file, s.job) {
+                        st.done.insert(job, f.clone());
+                    }
+                    st.stills.insert((s.shot, s.part), s.file);
+                }
+                st.project = Some(path.clone());
+                st.project_saved = Some(snapshot(app, &st));
+            });
+            log::write(&format!("project saved: {}", file_name(&path)));
+            remember_recent(&path);
+            show_project_name(app);
+            true
+        }
+        Err(e) => {
+            log::write(&format!("project not saved: {e}"));
+            error_dialog(&tr(["The project could not be saved: {}", "Das Projekt ließ sich nicht sichern: {}", "Impossible d’enregistrer le projet : {}", "No se pudo guardar el proyecto: {}"]).replace("{}", &e));
+            false
+        }
+    }
+}
+
+fn show_project_name(app: &AppWindow) {
+    let name = with_state(app, |st| st.borrow().project.as_ref().and_then(|p| p.file_stem()).map(|n| n.to_string_lossy().into_owned()));
+    app.set_project_name(name.unwrap_or_default().into());
+}
+
+/// Opens a project: its look and source at once, its stills after the small copies are made, then the source is read
+/// again (in the background) and the stills of unchanged shots are taken over.
+fn open_project(app: &AppWindow, path: PathBuf) {
+    if !may_discard(app) {
+        return;
+    }
+    let p = match project::load(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            log::write(&format!("project not opened: {e}"));
+            return error_dialog(&tr(["The project could not be opened: {}", "Das Projekt ließ sich nicht öffnen: {}", "Impossible d’ouvrir le projet : {}", "No se pudo abrir el proyecto: {}"]).replace("{}", &e));
+        }
+    };
+    log::write(&format!("project opened: {}", file_name(&path)));
+    apply_preset(app, &p.look);
+    app.set_headline(p.headline.clone().into());
+    app.set_mode(p.mode.clamp(0, 1));
+    let name = |o: &Option<PathBuf>| o.as_deref().map(file_name).unwrap_or_default();
+    app.set_master_name(name(&p.master).into());
+    app.set_list_name(name(&p.list).into());
+    app.set_bin_name(name(&p.bin).into());
+    let gate = with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        clear_source(app, &mut st);
+        st.master = None;
+        st.list = p.list.clone();
+        st.bin = p.bin.clone();
+        st.volumes = p.volumes_off.iter().map(|v| (v.clone(), false)).collect();
+        st.done = p.stills.iter().filter_map(|s| Some((s.job.clone()?, s.file.clone().ok()?))).collect();
+        st.carry = None;
+        st.project = Some(path.clone());
+        st.project_saved = None;
+        st.gate = Arc::default();
+        st.gate.clone()
+    });
+    remember_recent(&path);
+    show_project_name(app);
+    app.set_state(1);
+    app.set_progress(0.0);
+    app.set_work_text(tr(["Opening the project…", "Öffne das Projekt…", "Ouverture du projet…", "Abriendo el proyecto…"]).into());
+    app.set_time_left("".into());
+    refresh(app);
+    let weak = app.as_weak();
+    std::thread::spawn(move || {
+        let files: Vec<Result<PathBuf, String>> = p.stills.iter().map(|s| s.file.clone()).collect();
+        let thumbs = thumbnails(&files, &gate).unwrap_or_default();
+        let info = p.master.as_ref().filter(|_| p.mode == 0).and_then(|m| frames::probe(m).ok().map(|i| (m.clone(), i)));
+        let names = p.bin.as_ref().filter(|_| p.mode == 1).and_then(|b| avb::Bin::read(b).ok()).map(|b| sequences(&b));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_state(0);
+            let carry = Carry {
+                stills: p.stills.iter().map(|s| ((s.shot, s.part), s.file.clone())).collect(),
+                thumbs: p.stills.iter().zip(thumbs).filter_map(|(s, t)| Some(((s.shot, s.part), t?))).collect(),
+                shots: p.shots,
+                still_aspect: p.still_aspect,
+                timeline: Timeline { name: p.name, rate: p.rate, tracks: vec![] },
+                sequences: p.sequences,
+                info: p.source_info,
+            };
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                st.carry = Some(carry);
+                st.master = info;
+            });
+            if let Some(names) = &names {
+                show_sequence_menu(&app, names);
+                with_state(&app, |st| st.borrow_mut().sequence_names = names.clone());
+            }
+            if p.mode == 1 {
+                sync_volumes(&app);
+                load_bin(&app, p.sequence.max(0) as usize);
+            } else {
+                load_source(&app);
+            }
+        });
+    });
+}
+
+fn recent_path() -> Option<PathBuf> {
+    app_dir().map(|d| d.join("recent.txt"))
+}
+
+/// Projects opened or saved last, newest first, only those still there.
+fn recent() -> Vec<PathBuf> {
+    let text = recent_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    text.lines().map(PathBuf::from).filter(|p| p.join("project.json").is_file()).take(10).collect()
+}
+
+fn remember_recent(path: &Path) {
+    let mut list = recent();
+    list.retain(|p| p != path);
+    list.insert(0, path.to_path_buf());
+    list.truncate(10);
+    write_recent(&list);
+}
+
+fn write_recent(list: &[PathBuf]) {
+    if let Some(p) = recent_path() {
+        let _ = std::fs::create_dir_all(p.parent().unwrap());
+        let _ = std::fs::write(p, list.iter().map(|p| format!("{}\n", p.display())).collect::<String>());
+    }
+    all_windows().iter().for_each(|a| show_recent(&a.global::<Shared>()));
+}
+
+/// The Open Recent menu of a window.
+fn show_recent(shared: &Shared) {
+    let names: Vec<SharedString> = recent().iter().map(|p| p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into()).collect();
+    shared.set_recent(ModelRc::new(VecModel::from(names)));
+}
+
+/// What all windows share: the settings and the settings and manual windows.
+struct Ctx {
+    settings: Rc<RefCell<Settings>>,
+    others: Others,
+}
+
+fn set_language(code: &str) {
+    let _ = slint::select_bundled_translation(code);
+    LANG.store(LANGUAGES.iter().position(|l| l.0 == code).unwrap_or(0), Ordering::Relaxed);
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     #[cfg(target_os = "macos")]
     mac_window::srgb_windows();
     let settings = Rc::new(RefCell::new(load_settings()));
     clean_stills(false);
-    let app = AppWindow::new()?;
-    repaint_on_resize!(app);
-    let set_language = |code: &str| {
-        let _ = slint::select_bundled_translation(code);
-        LANG.store(LANGUAGES.iter().position(|l| l.0 == code).unwrap_or(0), Ordering::Relaxed);
-    };
     set_language(&settings.borrow().language);
-    apply_menus(&app.global::<Shared>(), &settings.borrow());
-    let others = Others::default();
     log::write(&format!("start {} {}", env!("CARGO_PKG_VERSION"), std::env::consts::ARCH));
     std::panic::set_hook(Box::new(|info| log::write(&format!("crash: {info}"))));
+    load_presets();
+    let ctx = Rc::new(Ctx { settings: settings.clone(), others: Others::default() });
+    let app = new_window(&ctx)?;
 
-    // Menu actions run after the click: they rename menu items, which crashed during macOS menu handling (seen in Ferry).
-    app.global::<Shared>().on_select_language({
-        let (weak, settings, others) = (app.as_weak(), settings.clone(), others.clone());
-        move |i| {
-            let (weak, settings, others) = (weak.clone(), settings.clone(), others.clone());
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                let Some(app) = weak.upgrade() else { return };
-                let code = LANGUAGES.get(i as usize).map_or("en", |l| l.0);
-                set_language(code);
-                settings.borrow_mut().language = code.into();
-                save_settings(&settings.borrow());
-                apply_all(&app, &others, &settings.borrow());
-                // texts Rust wrote (source line, sheet line) follow the language
-                load_texts_again(&app);
-            });
-        }
-    });
-    app.global::<Shared>().on_select_dark({
-        let (weak, settings, others) = (app.as_weak(), settings.clone(), others.clone());
-        move |dark| {
-            let (weak, settings, others) = (weak.clone(), settings.clone(), others.clone());
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                let Some(app) = weak.upgrade() else { return };
-                settings.borrow_mut().dark = dark;
-                save_settings(&settings.borrow());
-                apply_all(&app, &others, &settings.borrow());
-            });
-        }
-    });
-    // "Get test versions": the old result no longer applies – hide "up to date" and check again quietly
-    app.global::<Shared>().on_select_betas({
-        let (weak, settings, others) = (app.as_weak(), settings.clone(), others.clone());
-        move |betas| {
-            let (weak, settings, others) = (weak.clone(), settings.clone(), others.clone());
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                let Some(app) = weak.upgrade() else { return };
-                settings.borrow_mut().betas = betas;
-                save_settings(&settings.borrow());
-                {
-                    let s = settings.borrow();
-                    let mut u = s.update.lock().unwrap();
-                    if u.state == 2 || u.state == 4 {
-                        u.state = 0;
-                    }
-                }
-                apply_all(&app, &others, &settings.borrow());
-                check_for_update(&app, &settings.borrow(), false);
-            });
-        }
-    });
-
-    // Settings… opens the tab chosen last (never About); About opens the same window on the About tab
-    let open_settings = {
-        let (weak, settings, win) = (app.as_weak(), settings.clone(), others.settings.clone());
-        move |about: bool| {
-            let (weak, settings, win) = (weak.clone(), settings.clone(), win.clone());
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                let mut win = win.borrow_mut();
-                if win.is_none() {
-                    *win = SettingsWindow::new().ok();
-                    win.iter().for_each(|w| {
-                        repaint_on_resize!(w);
-                        forward_menu(&w.global::<Shared>(), &weak);
-                        wire_support(w, &settings);
-                        w.set_version(env!("CARGO_PKG_VERSION").into());
-                        w.set_last_tab(settings.borrow().tab);
-                        w.on_tab_chosen({
-                            let settings = settings.clone();
-                            move |tab| {
-                                settings.borrow_mut().tab = tab;
-                                save_settings(&settings.borrow());
-                            }
-                        });
-                        w.on_open_source(|| {
-                            let _ = std::process::Command::new("open").arg(format!("https://github.com/{}", UPDATE_APP.repo)).spawn();
-                        });
-                        w.on_open_license(|| {
-                            // bundled license text, otherwise the FSF page
-                            let bundled = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("Resources/LICENSE.txt")));
-                            let target = bundled.filter(|p| p.exists()).map_or("https://www.gnu.org/licenses/gpl-3.0.html".into(), |p| p.display().to_string());
-                            let _ = std::process::Command::new("open").arg(target).spawn();
-                        });
-                    });
-                }
-                if let Some(w) = win.as_ref() {
-                    apply_menus(&w.global::<Shared>(), &settings.borrow());
-                    w.set_tab(if about { 3 } else { w.get_last_tab() });
-                    let _ = w.show();
-                }
-            });
-        }
-    };
-    app.global::<Shared>().on_show_settings({
-        let open = open_settings.clone();
-        move || open(false)
-    });
-    app.global::<Shared>().on_show_about(move || open_settings(true));
-    app.global::<Shared>().on_refresh_update({
-        let (weak, settings, others) = (app.as_weak(), settings.clone(), others.clone());
-        move || weak.upgrade().iter().for_each(|a| apply_all(a, &others, &settings.borrow()))
-    });
-    app.global::<Shared>().on_check_update({
-        let (weak, settings) = (app.as_weak(), settings.clone());
-        move || weak.upgrade().iter().for_each(|a| check_for_update(a, &settings.borrow(), true))
-    });
-    app.global::<Shared>().on_install_update({
-        let (weak, settings) = (app.as_weak(), settings.clone());
-        move || weak.upgrade().iter().for_each(|a| install_update(a, &settings.borrow()))
-    });
-    app.global::<Shared>().on_show_release({
-        let settings = settings.clone();
-        move || {
-            if let Some(r) = settings.borrow().update.lock().unwrap().available.as_ref() {
-                let _ = std::process::Command::new("open").arg(&r.page).spawn();
-            }
-        }
-    });
-    // quietly shortly after the start, then every 6 hours
+    // updates: quietly shortly after the start, then every 6 hours
     slint::Timer::single_shot(Duration::from_secs(5), {
-        let (weak, settings) = (app.as_weak(), settings.clone());
-        move || weak.upgrade().iter().for_each(|a| check_for_update(a, &settings.borrow(), false))
+        let settings = settings.clone();
+        move || front_window().iter().for_each(|a| check_for_update(a, &settings.borrow(), false))
     });
     let update_timer = slint::Timer::default();
     update_timer.start(slint::TimerMode::Repeated, Duration::from_secs(6 * 3600), {
-        let (weak, settings) = (app.as_weak(), settings.clone());
-        move || weak.upgrade().iter().for_each(|a| check_for_update(a, &settings.borrow(), false))
+        let settings = settings.clone();
+        move || front_window().iter().for_each(|a| check_for_update(a, &settings.borrow(), false))
     });
-    app.global::<Shared>().on_show_log(|| {
+    // volumes come and go: look every 2 s in the windows that show the bin mode
+    let poll = slint::Timer::default();
+    poll.start(slint::TimerMode::Repeated, Duration::from_secs(2), || {
+        for a in all_windows().iter().filter(|a| a.get_mode() == 1) {
+            sync_volumes(a);
+        }
+    });
+    #[cfg(target_os = "macos")]
+    {
+        let c = ctx.clone();
+        mac_app::install(
+            Box::new(move |p| {
+                let c = c.clone();
+                slint::Timer::single_shot(Duration::ZERO, move || open_project_in(&c, front_window(), p.clone()));
+            }),
+            // Quit: every window with unsaved changes asks; Cancel in one stops quitting
+            Box::new(|| all_windows().iter().all(|a| {
+                if unsaved(a) {
+                    let _ = a.show();
+                }
+                may_discard(a)
+            })),
+        );
+        mac_menu::install(
+            Box::new(|| front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_show_about())),
+            Box::new(|| front_window().into_iter().for_each(|a| a.global::<Shared>().invoke_show_settings())),
+            &app.get_txt_settings_menu(),
+        );
+    }
+    drop(app);
+    // title bars follow the app's light/dark; the settings tab bar follows the title bar (lighter while active)
+    #[cfg(target_os = "macos")]
+    let chrome = slint::Timer::default();
+    #[cfg(target_os = "macos")]
+    chrome.start(slint::TimerMode::Repeated, Duration::from_millis(200), {
+        let (win, settings) = (ctx.others.settings.clone(), settings.clone());
+        let fitted = RefCell::new(std::collections::HashSet::new());
+        move || {
+            mac_window::appearance_all(settings.borrow().dark);
+            for a in all_windows() {
+                if mac_window::is_key(a.window()) {
+                    FRONT.with(|f| f.set(a.get_win_id()));
+                }
+                // never taller than the screen minus the title bar (small laptops)
+                let (screen_w, screen) = mac_window::screen_size();
+                if screen > 0.0 && ((screen - 28.0).min(820.0) - a.get_smallest_height() as f64).abs() > 0.5 {
+                    a.set_smallest_height((screen - 28.0).min(820.0) as f32);
+                }
+                // the standard size is made for a large screen: on a smaller one the window fits it, once
+                if screen > 0.0 && fitted.borrow_mut().insert(a.get_win_id()) {
+                    let size = a.window().size().to_logical(a.window().scale_factor());
+                    let (w, h) = ((size.width as f64).min(screen_w), (size.height as f64).min(screen - 28.0));
+                    if w < size.width as f64 - 0.5 || h < size.height as f64 - 0.5 {
+                        a.window().set_size(slint::LogicalSize::new(w as f32, h as f32));
+                    }
+                }
+                // a window can grow, never shrink below what the side column needs (also when dragged)
+                mac_window::set_min_size(a.window(), a.get_smallest_width() as f64, a.get_smallest_height() as f64);
+            }
+            if let Some(w) = win.borrow().as_ref() {
+                // the NSWindow exists only once the event loop has run after show(); only changes it once
+                mac_window::unify_titlebar(w.window(), 800.0, 450.0);
+            }
+        }
+    });
+    #[cfg(target_os = "macos")]
+    mac_window::on_key_change({
+        let win = ctx.others.settings.clone();
+        Box::new(move || {
+            // called from inside AppKit (also while show() holds the window's RefCell): update on the next turn
+            let win = win.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                if let Some(w) = win.borrow().as_ref() {
+                    let key = mac_window::is_key(w.window());
+                    if w.get_active() != key {
+                        w.set_active(key);
+                    }
+                }
+            });
+        })
+    });
+
+    load_fonts();
+    let result = slint::run_event_loop();
+    // the stills are only needed while the app is open
+    clean_stills(true);
+    result
+}
+
+/// A new project window, a little below and right of the one in front.
+fn new_window(ctx: &Rc<Ctx>) -> Result<AppWindow, slint::PlatformError> {
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    let app = AppWindow::new()?;
+    // Slint takes the language only once a window exists (before the first one it is ignored)
+    set_language(&ctx.settings.borrow().language);
+    app.set_win_id(NEXT.fetch_add(1, Ordering::Relaxed) as i32);
+    repaint_on_resize!(app);
+    let from = front_window();
+    WINDOWS.with(|w| w.borrow_mut().push(app.clone_strong()));
+    FRONT.with(|f| f.set(app.get_win_id()));
+    wire_shared(&app, ctx);
+    wire_window(&app, ctx);
+    show_fonts(&app);
+    preset_menu(&app);
+    refresh(&app);
+    app.show()?;
+    if let Some(f) = from {
+        let (p, k) = (f.window().position(), f.window().scale_factor());
+        app.window().set_position(slint::PhysicalPosition::new(p.x + (28.0 * k) as i32, p.y + (28.0 * k) as i32));
+    }
+    Ok(app)
+}
+
+/// Closes a project window after asking about unsaved changes; its state and its stills folder go with it.
+fn close_window(app: &AppWindow) {
+    if !may_discard(app) {
+        return;
+    }
+    let id = app.get_win_id();
+    log::write("window closed");
+    let _ = app.hide();
+    WINDOWS.with(|w| w.borrow_mut().retain(|a| a.get_win_id() != id));
+    STATES.with(|s| s.borrow_mut().remove(&id));
+    let _ = std::fs::remove_dir_all(cache_dir().join(format!("window-{id}")));
+}
+
+/// A window shows nothing yet: no project, no source, no stills – an opened project can take it over.
+fn pristine(app: &AppWindow) -> bool {
+    with_state(app, |st| {
+        let st = st.borrow();
+        st.project.is_none() && st.master.is_none() && st.list.is_none() && st.bin.is_none() && st.stills.is_empty()
+    })
+}
+
+/// Opens a project in its own window: the window it is already open in comes to the front; an empty window `from`
+/// takes it, else a new window opens.
+fn open_project_in(ctx: &Rc<Ctx>, from: Option<AppWindow>, path: PathBuf) {
+    let same = |p: &Path| p.canonicalize().ok() == path.canonicalize().ok();
+    if let Some(w) = all_windows().into_iter().find(|w| with_state(w, |st| st.borrow().project.as_deref().is_some_and(same))) {
+        let _ = w.show();
+        FRONT.with(|f| f.set(w.get_win_id()));
+        return;
+    }
+    let target = match from.filter(pristine) {
+        Some(w) => Some(w),
+        None => new_window(ctx).map_err(|e| log::write(&format!("no new window: {e}"))).ok(),
+    };
+    if let Some(t) = target {
+        open_project(&t, path);
+    }
+}
+
+/// Settings… opens the tab chosen last (never About); About opens the same window on the About tab.
+fn open_settings(ctx: &Rc<Ctx>, about: bool) {
+    let ctx = ctx.clone();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        let settings = &ctx.settings;
+        let mut win = ctx.others.settings.borrow_mut();
+        if win.is_none() {
+            *win = SettingsWindow::new().ok();
+            win.iter().for_each(|w| {
+                repaint_on_resize!(w);
+                forward_menu(&w.global::<Shared>());
+                wire_support(w, settings);
+                w.set_version(env!("CARGO_PKG_VERSION").into());
+                w.set_last_tab(settings.borrow().tab);
+                w.on_tab_chosen({
+                    let settings = settings.clone();
+                    move |tab| {
+                        settings.borrow_mut().tab = tab;
+                        save_settings(&settings.borrow());
+                    }
+                });
+                w.on_open_source(|| {
+                    let _ = std::process::Command::new("open").arg(format!("https://github.com/{}", UPDATE_APP.repo)).spawn();
+                });
+                w.on_open_license(|| {
+                    // bundled license text, otherwise the FSF page
+                    let bundled = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("Resources/LICENSE.txt")));
+                    let target = bundled.filter(|p| p.exists()).map_or("https://www.gnu.org/licenses/gpl-3.0.html".into(), |p| p.display().to_string());
+                    let _ = std::process::Command::new("open").arg(target).spawn();
+                });
+            });
+        }
+        if let Some(w) = win.as_ref() {
+            apply_menus(&w.global::<Shared>(), &settings.borrow());
+            w.set_tab(if about { 3 } else { w.get_last_tab() });
+            let _ = w.show();
+        }
+    });
+}
+
+/// The app's menus in a project window: language, appearance, updates, settings, manual, log.
+// Menu actions run after the click: they rename menu items, which crashed during macOS menu handling (seen in Ferry).
+fn wire_shared(app: &AppWindow, ctx: &Rc<Ctx>) {
+    let shared = app.global::<Shared>();
+    apply_menus(&shared, &ctx.settings.borrow());
+    let c = ctx.clone();
+    shared.on_select_language(move |i| {
+        let c = c.clone();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            let code = LANGUAGES.get(i as usize).map_or("en", |l| l.0);
+            set_language(code);
+            c.settings.borrow_mut().language = code.into();
+            save_settings(&c.settings.borrow());
+            apply_all(&c.others, &c.settings.borrow());
+            // texts Rust wrote (source line, sheet line) follow the language
+            all_windows().iter().for_each(load_texts_again);
+        });
+    });
+    let c = ctx.clone();
+    shared.on_select_dark(move |dark| {
+        let c = c.clone();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            c.settings.borrow_mut().dark = dark;
+            save_settings(&c.settings.borrow());
+            apply_all(&c.others, &c.settings.borrow());
+        });
+    });
+    // "Get test versions": the old result no longer applies – hide "up to date" and check again quietly
+    let c = ctx.clone();
+    shared.on_select_betas(move |betas| {
+        let c = c.clone();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            c.settings.borrow_mut().betas = betas;
+            save_settings(&c.settings.borrow());
+            {
+                let s = c.settings.borrow();
+                let mut u = s.update.lock().unwrap();
+                if u.state == 2 || u.state == 4 {
+                    u.state = 0;
+                }
+            }
+            apply_all(&c.others, &c.settings.borrow());
+            front_window().iter().for_each(|a| check_for_update(a, &c.settings.borrow(), false));
+        });
+    });
+    let c = ctx.clone();
+    shared.on_show_settings(move || open_settings(&c, false));
+    let c = ctx.clone();
+    shared.on_show_about(move || open_settings(&c, true));
+    let c = ctx.clone();
+    shared.on_refresh_update(move || apply_all(&c.others, &c.settings.borrow()));
+    let (weak, c) = (app.as_weak(), ctx.clone());
+    shared.on_check_update(move || weak.upgrade().iter().for_each(|a| check_for_update(a, &c.settings.borrow(), true)));
+    let (weak, c) = (app.as_weak(), ctx.clone());
+    shared.on_install_update(move || weak.upgrade().iter().for_each(|a| install_update(a, &c.settings.borrow())));
+    let c = ctx.clone();
+    shared.on_show_release(move || {
+        if let Some(r) = c.settings.borrow().update.lock().unwrap().available.as_ref() {
+            let _ = std::process::Command::new("open").arg(&r.page).spawn();
+        }
+    });
+    shared.on_show_log(|| {
         log::write("log file shown");
         let _ = std::process::Command::new("open").arg("-R").arg(log::path()).spawn();
     });
-    app.global::<Shared>().on_show_help({
-        let (weak, settings, help) = (app.as_weak(), settings.clone(), others.help.clone());
-        move || {
-            let (weak, settings, help) = (weak.clone(), settings.clone(), help.clone());
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                let mut help = help.borrow_mut();
-                if help.is_none() {
-                    *help = HelpWindow::new().ok();
-                    help.iter().for_each(|h| {
-                        repaint_on_resize!(h);
-                        forward_menu(&h.global::<Shared>(), &weak)
-                    });
-                }
-                if let Some(h) = help.as_ref() {
-                    update_help(h, &settings.borrow());
-                    let _ = h.show();
-                }
-            });
-        }
+    let c = ctx.clone();
+    shared.on_show_help(move || {
+        let c = c.clone();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            let mut help = c.others.help.borrow_mut();
+            if help.is_none() {
+                *help = HelpWindow::new().ok();
+                help.iter().for_each(|h| {
+                    repaint_on_resize!(h);
+                    forward_menu(&h.global::<Shared>())
+                });
+            }
+            if let Some(h) = help.as_ref() {
+                update_help(h, &c.settings.borrow());
+                let _ = h.show();
+            }
+        });
     });
+}
 
+/// Source, grabbing, sheet, presets, export and the File menu of one project window.
+fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
     app.on_pick_master({
         let weak = app.as_weak();
         move || {
@@ -1379,11 +1977,11 @@ fn main() -> Result<(), slint::PlatformError> {
             match frames::probe(&p) {
                 Ok(info) => {
                     app.set_master_name(file_name(&p).into());
-                    STATE.with(|st| st.borrow_mut().master = Some((p, info)));
+                    with_state(&app, |st| st.borrow_mut().master = Some((p, info)));
                 }
                 Err(e) => {
                     app.set_master_name("".into());
-                    STATE.with(|st| st.borrow_mut().master = None);
+                    with_state(&app, |st| st.borrow_mut().master = None);
                     app.set_source_error(e.into());
                     return;
                 }
@@ -1399,7 +1997,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             app.set_list_name(file_name(&p).into());
-            STATE.with(|st| st.borrow_mut().list = Some(p));
+            with_state(&app, |st| st.borrow_mut().list = Some(p));
             load_source(&app);
         }
     });
@@ -1430,10 +2028,10 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             app.set_bin_name(file_name(&p).into());
             show_sequence_menu(&app, &names);
-            STATE.with(|st| st.borrow_mut().sequence_names = names.clone());
-            STATE.with(|st| st.borrow_mut().bin = Some(p));
+            with_state(&app, |st| st.borrow_mut().sequence_names = names.clone());
+            with_state(&app, |st| st.borrow_mut().bin = Some(p));
             if names.is_empty() {
-                STATE.with(|st| clear_source(&app, &mut st.borrow_mut()));
+                with_state(&app, |st| clear_source(&app, &mut st.borrow_mut()));
                 app.set_source_error(tr(["The bin holds no sequence.", "Der Bin enthält keine Sequenz.", "Le chutier ne contient aucune séquence.", "El bin no contiene ninguna secuencia."]).into());
                 return refresh(&app);
             }
@@ -1448,22 +2046,13 @@ fn main() -> Result<(), slint::PlatformError> {
     app.on_toggle_volume({
         let weak = app.as_weak();
         move |i| {
-            STATE.with(|st| {
+            let Some(app) = weak.upgrade() else { return };
+            with_state(&app, |st| {
                 if let Some(v) = st.borrow_mut().volumes.get_mut(i as usize) {
                     v.1 = !v.1;
                 }
             });
-            weak.upgrade().iter().for_each(sync_volumes);
-        }
-    });
-    // volumes come and go: look every 2 s while the bin mode is shown
-    let poll = slint::Timer::default();
-    poll.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(2), {
-        let weak = app.as_weak();
-        move || {
-            if let Some(app) = weak.upgrade().filter(|a| a.get_mode() == 1) {
-                sync_volumes(&app);
-            }
+            sync_volumes(&app);
         }
     });
     app.on_grab({
@@ -1473,19 +2062,64 @@ fn main() -> Result<(), slint::PlatformError> {
     app.on_pause({
         let weak = app.as_weak();
         move |on| {
-            STATE.with(|st| st.borrow().gate.pause.store(on, Ordering::Relaxed));
-            weak.upgrade().iter().for_each(|a| a.set_paused(on));
+            let Some(app) = weak.upgrade() else { return };
+            with_state(&app, |st| st.borrow().gate.pause.store(on, Ordering::Relaxed));
+            app.set_paused(on);
         }
     });
-    app.on_cancel(|| STATE.with(|st| st.borrow().gate.cancel.store(true, Ordering::Relaxed)));
+    app.on_cancel({
+        let weak = app.as_weak();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            with_state(&app, |st| st.borrow().gate.cancel.store(true, Ordering::Relaxed));
+        }
+    });
     // headline anchor: a sensible move for the new point (inside the sheet), then draw
+    app.on_paper_chosen({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_paper(i);
+            show_paper(&app);
+            refresh(&app);
+        }
+    });
+    app.on_orientation_chosen({
+        let weak = app.as_weak();
+        move |landscape| {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_landscape(landscape);
+            let (w, h) = (app.get_custom_w(), app.get_custom_h());
+            if let (Ok(a), Ok(b)) = (whole(&w, ""), whole(&h, ""))
+                && a != b
+                && (a > b) != landscape
+            {
+                app.set_custom_w(h);
+                app.set_custom_h(w);
+            }
+            refresh(&app);
+        }
+    });
+    app.on_unit_chosen({
+        let weak = app.as_weak();
+        move |px| {
+            let Some(app) = weak.upgrade() else { return };
+            switch_unit(&app, px);
+            refresh(&app);
+        }
+    });
+    app.on_size_edited({
+        let weak = app.as_weak();
+        move || weak.upgrade().iter().for_each(size_edited)
+    });
     app.on_anchor_chosen({
         let weak = app.as_weak();
         move |i| {
             let Some(app) = weak.upgrade() else { return };
             app.set_head_anchor(i);
-            app.set_head_dx(["10", "0", "-10"][i as usize % 3].into());
-            app.set_head_dy(["8", "0", "-8"][(i as usize / 3).min(2)].into());
+            let per = mm_per_unit(&app);
+            app.set_head_dx(in_unit([10.0, 0.0, -10.0][i as usize % 3], per));
+            app.set_head_dy(in_unit([8.0, 0.0, -8.0][(i as usize / 3).min(2)], per));
             refresh(&app);
         }
     });
@@ -1519,7 +2153,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(save)
     });
-    show_presets(&app);
     app.on_preset_chosen({
         let weak = app.as_weak();
         move |i| {
@@ -1597,77 +2230,64 @@ fn main() -> Result<(), slint::PlatformError> {
             store_presets(&app, String::new());
         }
     });
-    app.on_reveal(|| {
-        if let Some(p) = STATE.with(|st| st.borrow().saved.clone()) {
+    app.on_reveal({
+        let weak = app.as_weak();
+        move || {
+        let Some(app) = weak.upgrade() else { return };
+        if let Some(p) = with_state(&app, |st| st.borrow().saved.clone()) {
             let _ = std::process::Command::new("open").arg("-R").arg(p).spawn();
         }
-    });
-
-    #[cfg(target_os = "macos")]
-    {
-        let (w1, w2) = (app.as_weak(), app.as_weak());
-        mac_menu::install(
-            Box::new(move || w1.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_about())),
-            Box::new(move || w2.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_settings())),
-            &app.get_txt_settings_menu(),
-        );
-    }
-    // title bars follow the app's light/dark; the settings tab bar follows the title bar (lighter while active)
-    #[cfg(target_os = "macos")]
-    let chrome = slint::Timer::default();
-    #[cfg(target_os = "macos")]
-    chrome.start(slint::TimerMode::Repeated, Duration::from_millis(200), {
-        let (win, settings, weak) = (others.settings.clone(), settings.clone(), app.as_weak());
-        let fitted = std::cell::Cell::new(false);
-        move || {
-            mac_window::appearance_all(settings.borrow().dark);
-            // the main window can grow, never shrink below what the side column needs (also when dragged)
-            if let Some(a) = weak.upgrade() {
-                // never taller than the screen minus the title bar (small laptops)
-                let (screen_w, screen) = mac_window::screen_size();
-                if screen > 0.0 && ((screen - 28.0).min(820.0) - a.get_smallest_height() as f64).abs() > 0.5 {
-                    a.set_smallest_height((screen - 28.0).min(820.0) as f32);
-                }
-                // the standard size is made for a large screen: on a smaller one the window fits it, once
-                if screen > 0.0 && !fitted.get() {
-                    fitted.set(true);
-                    let size = a.window().size().to_logical(a.window().scale_factor());
-                    let (w, h) = ((size.width as f64).min(screen_w), (size.height as f64).min(screen - 28.0));
-                    if w < size.width as f64 - 0.5 || h < size.height as f64 - 0.5 {
-                        a.window().set_size(slint::LogicalSize::new(w as f32, h as f32));
-                    }
-                }
-                mac_window::set_min_size(a.window(), a.get_smallest_width() as f64, a.get_smallest_height() as f64);
-            }
-            if let Some(w) = win.borrow().as_ref() {
-                // the NSWindow exists only once the event loop has run after show(); only changes it once
-                mac_window::unify_titlebar(w.window(), 800.0, 450.0);
-            }
         }
     });
-    #[cfg(target_os = "macos")]
-    mac_window::on_key_change({
-        let win = others.settings.clone();
-        Box::new(move || {
-            // called from inside AppKit (also while show() holds the window's RefCell): update on the next turn
-            let win = win.clone();
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                if let Some(w) = win.borrow().as_ref() {
-                    let key = mac_window::is_key(w.window());
-                    if w.get_active() != key {
-                        w.set_active(key);
-                    }
-                }
-            });
-        })
-    });
 
-    load_fonts(&app);
-    refresh(&app);
-    let result = app.run();
-    // the stills are only needed while the app is open
-    clean_stills(true);
-    result
+    // File menu: run after the click (dialogs during macOS menu handling are asking for trouble, see above)
+    let shared = app.global::<Shared>();
+    let later = |f: Rc<dyn Fn(&AppWindow)>, weak: slint::Weak<AppWindow>| {
+        move || {
+            let (weak, f) = (weak.clone(), f.clone());
+            slint::Timer::single_shot(Duration::ZERO, move || weak.upgrade().iter().for_each(|a| f(a)));
+        }
+    };
+    let c = ctx.clone();
+    shared.on_new_project(later(
+        Rc::new(move |_| {
+            if let Err(e) = new_window(&c) {
+                log::write(&format!("no new window: {e}"));
+            }
+        }),
+        app.as_weak(),
+    ));
+    shared.on_save_project(later(Rc::new(|a| { save_project(a, false); }), app.as_weak()));
+    shared.on_save_project_as(later(Rc::new(|a| { save_project(a, true); }), app.as_weak()));
+    let c = ctx.clone();
+    shared.on_open_project(later(
+        Rc::new(move |a| {
+            if let Some(p) = rfd::FileDialog::new().set_title(tr(["Open project", "Projekt öffnen", "Ouvrir un projet", "Abrir proyecto"])).add_filter("CineMosaic", &[project::EXT]).pick_file() {
+                open_project_in(&c, Some(a.clone_strong()), p);
+            }
+        }),
+        app.as_weak(),
+    ));
+    let (weak, c) = (app.as_weak(), ctx.clone());
+    shared.on_open_recent(move |i| {
+        let (weak, c) = (weak.clone(), c.clone());
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            if let Some(p) = recent().get(i as usize).cloned() {
+                open_project_in(&c, weak.upgrade(), p);
+            }
+        });
+    });
+    shared.on_clear_recent(|| write_recent(&[]));
+    shared.on_close_window(later(Rc::new(close_window), app.as_weak()));
+    // the red button: same as Close Window, but the window must stay until the answer
+    app.window().on_close_requested({
+        let weak = app.as_weak();
+        move || {
+            let weak = weak.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || weak.upgrade().iter().for_each(close_window));
+            slint::CloseRequestResponse::KeepWindowShown
+        }
+    });
 }
 
 /// The Sequence menu: "All sequences", then every sequence of the bin.
@@ -1679,11 +2299,11 @@ fn show_sequence_menu(app: &AppWindow, names: &[String]) {
 
 /// After a language change: the lines Rust wrote are written again in the new language.
 fn load_texts_again(app: &AppWindow) {
-    let names = STATE.with(|st| st.borrow().sequence_names.clone());
+    let names = with_state(app, |st| st.borrow().sequence_names.clone());
     if !names.is_empty() {
         show_sequence_menu(app, &names);
     }
-    STATE.with(|st| {
+    with_state(app, |st| {
         let st = st.borrow();
         if let Some(t) = &st.timeline
             && !st.shots.is_empty()
@@ -1810,6 +2430,64 @@ mod mac_menu {
             ORIGINAL_SET_MAIN_MENU.store(original as usize, Ordering::Relaxed);
         }
         ensure();
+    }
+}
+
+/// Project files from the Finder (double-click, drop on the Dock icon) and Quit asking about unsaved work: two
+/// methods added to winit's application delegate class (winit registers it but offers neither).
+#[cfg(target_os = "macos")]
+mod mac_app {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use objc2::sel;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    type Open = RefCell<Option<Box<dyn Fn(PathBuf)>>>;
+    type Quit = RefCell<Option<Box<dyn Fn() -> bool>>>;
+    thread_local! {
+        static OPEN: Open = RefCell::new(None);
+        static QUIT: Quit = RefCell::new(None);
+    }
+
+    extern "C-unwind" fn open_urls(_: *mut AnyObject, _: Sel, _: *mut AnyObject, urls: *mut AnyObject) {
+        let count: usize = unsafe { msg_send![urls, count] };
+        for i in 0..count {
+            let path: *mut AnyObject = unsafe {
+                let url: *mut AnyObject = msg_send![urls, objectAtIndex: i];
+                msg_send![url, path]
+            };
+            if path.is_null() {
+                continue;
+            }
+            let c: *const std::ffi::c_char = unsafe { msg_send![path, UTF8String] };
+            if c.is_null() {
+                continue;
+            }
+            let p = PathBuf::from(unsafe { std::ffi::CStr::from_ptr(c) }.to_string_lossy().into_owned());
+            OPEN.with(|h| h.borrow().iter().for_each(|f| f(p.clone())));
+        }
+    }
+
+    /// NSTerminateNow (1) or NSTerminateCancel (0)
+    extern "C-unwind" fn should_terminate(_: *mut AnyObject, _: Sel, _: *mut AnyObject) -> usize {
+        QUIT.with(|h| h.borrow().as_ref().is_none_or(|f| f())) as usize
+    }
+
+    pub fn install(open: Box<dyn Fn(PathBuf)>, quit: Box<dyn Fn() -> bool>) {
+        OPEN.with(|h| *h.borrow_mut() = Some(open));
+        QUIT.with(|h| *h.borrow_mut() = Some(quit));
+        let Some(cls) = AnyClass::get(c"WinitApplicationDelegate") else {
+            crate::log::write("no WinitApplicationDelegate: projects cannot be opened from the Finder");
+            return;
+        };
+        type OpenFn = extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject);
+        type QuitFn = extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize;
+        let cls = cls as *const AnyClass as *mut AnyClass;
+        unsafe {
+            objc2::ffi::class_addMethod(cls, sel!(application:openURLs:), std::mem::transmute::<OpenFn, Imp>(open_urls), c"v@:@@".as_ptr());
+            objc2::ffi::class_addMethod(cls, sel!(applicationShouldTerminate:), std::mem::transmute::<QuitFn, Imp>(should_terminate), c"Q@:@".as_ptr());
+        }
     }
 }
 

@@ -254,8 +254,38 @@ msgstr "No hay ningún volumen con una carpeta «Avid MediaFiles» conectado."
 msgid "Grab stills again"
 msgstr "Volver a extraer"
 
+msgid "File"
+msgstr "Archivo"
+
+msgid "New Project"
+msgstr "Nuevo proyecto"
+
+msgid "Open Project…"
+msgstr "Abrir proyecto…"
+
+msgid "Open Recent"
+msgstr "Abrir reciente"
+
+msgid "Clear Menu"
+msgstr "Borrar menú"
+
+msgid "Close Window"
+msgstr "Cerrar ventana"
+
+msgid "Save Project"
+msgstr "Guardar proyecto"
+
+msgid "Save Project As…"
+msgstr "Guardar proyecto como…"
+
 msgid "Grab {} missing stills"
 msgstr "Capturar {} fotogramas que faltan"
+
+msgid "Unit"
+msgstr "Unidad"
+
+msgid "Pixels"
+msgstr "Píxeles"
 
 msgid "Grab stills"
 msgstr "Extraer fotogramas"
@@ -448,9 +478,6 @@ msgstr "Abajo en el centro"
 
 msgid "Bottom right"
 msgstr "Abajo a la derecha"
-
-msgid "Line"
-msgstr "Línea"
 
 msgid "Pattern"
 msgstr "Patrón"

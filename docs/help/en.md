@@ -36,17 +36,21 @@ If your picture has black bars, choose its format under Sheet › Picture format
 
 ## The sheet
 
-Paper: DIN A0 to A6 or Custom (width × height in mm), portrait or landscape. Resolution in dpi: 300 for print, 150 for the screen. Margin is the empty border around everything, Gap the space between two stills, both in mm – press in the field and drag left or right to change them, or click and type. With Columns automatic CineMosaic chooses the number of columns that makes the stills largest; switch it off to set the number yourself. The line below shows the grid, the size of the sheet in pixels and the size of one still.
+Width × height is always shown: choose DIN A0 to A6 in the Paper list to fill it in, or type your own size – the list then shows Custom (or the A size it matches). Portrait or landscape turns the sheet. Unit switches every length – paper, margin, gap, frame line and the headline's X and Y – between mm and pixels; the type size stays in points. All of them are whole numbers. Resolution in dpi: 300 for print, 150 for the screen. Margin is the empty border around everything, Gap the space between two stills – press in the field and drag left or right to change them, or click and type. With Columns automatic CineMosaic chooses the number of columns that makes the stills largest; switch it off to set the number yourself. The line below shows the grid and the size of one still in pixels.
 
 Very large sheets (A0 at 600 dpi) need a lot of memory to save; the line below the sheet says how much.
 
 ## Frame line, headline and crop marks
 
-The side column has four tabs: Source, Sheet, Line and Headline. Under Line, Frame line draws a line around the sheet: choose a pattern (single, double, thick – thin, thin – thick, thin – thick – thin, two close and one apart), the thickness of a thin strand, the distance from the edge and the colour (black at first; a swatch or a hex value like #3c4146).
+The side column has four tabs: Source, Sheet, Frame line and Headline. Under Frame line, the switch draws a line around the sheet: choose a pattern (single, double, thick – thin, thin – thick, thin – thick – thin, two close and one apart), the thickness of a thin strand, the distance from the edge and the colour (black at first; a swatch or a hex value like #3c4146).
 
-Under Headline, type the title. The font list shows every font of your Mac in its own look; ↑ and ↓ step through it and the sheet follows at once, a letter jumps to the next font starting with it. Then size in points, bold, italic and colour. The anchor is the point of the sheet the headline hangs at – one of nine, like in an image editor; X and Y move it from there in mm. You can also drag the headline in the preview. Where it covers the frame line, the line breaks around it. A headline at the top or bottom keeps the stills clear; in the middle it lies over them.
+Under Headline, type the title. The font list shows every font of your Mac in its own look; ↑ and ↓ step through it and the sheet follows at once, a letter jumps to the next font starting with it. Then size in points, bold, italic and colour. The anchor is the point of the sheet the headline hangs at – one of nine, like in an image editor; X and Y move it from there in mm or pixels. You can also drag the headline in the preview. Where it covers the frame line, the line breaks around it. A headline at the top or bottom keeps the stills clear; in the middle it lies over them.
 
 Sheet › Crop marks lays the sheet out in an area of the picture format inside the paper – for stills in 2:1 an area of 2:1 – and puts crop marks at its corners, so you can cut it out.
+
+## Projects
+
+File › Save Project (⌘S) keeps everything as one project file: source, sheet, headline and the grabbed stills. File › Open Project… (⌘O), Open Recent or a double-click in the Finder brings it back – at once, with its stills, even when the master, the bin or the volumes are not connected. CineMosaic then reads the source again: if the cut has changed, unchanged shots keep their stills, new or changed ones show grey and "Grab N missing stills" grabs only those (frames grabbed before are reused). Every project has its own window: New Project (⌘N) opens a new, empty window, and an opened project gets its own window too (an empty window takes it; a project that is already open comes to the front). Save Project As… (⇧⌘S) makes a copy, Close Window (⌘W) closes one. Before unsaved changes would be lost – closing a window or Quit – CineMosaic asks whether to save them.
 
 ## Presets
 

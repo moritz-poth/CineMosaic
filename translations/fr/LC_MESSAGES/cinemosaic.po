@@ -254,8 +254,38 @@ msgstr "Aucun volume avec un dossier « Avid MediaFiles » n’est connecté."
 msgid "Grab stills again"
 msgstr "Reprendre les images"
 
+msgid "File"
+msgstr "Fichier"
+
+msgid "New Project"
+msgstr "Nouveau projet"
+
+msgid "Open Project…"
+msgstr "Ouvrir un projet…"
+
+msgid "Open Recent"
+msgstr "Ouvrir l’élément récent"
+
+msgid "Clear Menu"
+msgstr "Effacer le menu"
+
+msgid "Close Window"
+msgstr "Fermer la fenêtre"
+
+msgid "Save Project"
+msgstr "Enregistrer le projet"
+
+msgid "Save Project As…"
+msgstr "Enregistrer le projet sous…"
+
 msgid "Grab {} missing stills"
 msgstr "Récupérer {} images manquantes"
+
+msgid "Unit"
+msgstr "Unité"
+
+msgid "Pixels"
+msgstr "Pixels"
 
 msgid "Grab stills"
 msgstr "Extraire les images"
@@ -448,9 +478,6 @@ msgstr "En bas au centre"
 
 msgid "Bottom right"
 msgstr "En bas à droite"
-
-msgid "Line"
-msgstr "Cadre"
 
 msgid "Pattern"
 msgstr "Motif"

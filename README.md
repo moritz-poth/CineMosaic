@@ -13,6 +13,7 @@ Takes one still from the middle of every shot of a cut and lays them out on one 
 - **Picture format.** Black bars are cut off for 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 or any format of your own.
 - **The sheet.** DIN A0–A6 or your own size, portrait or landscape, resolution in dpi, margin and gap in mm, columns automatic (largest stills) or fixed. A live preview shows the sheet as you set it up.
 - **Saving.** PNG, TIFF and JPEG with the resolution in the file, PDF in the paper size.
+- **Projects.** Save the whole sheet with its stills as a project, open it again later – also without the source – and when the cut has changed, grab only the new or changed shots.
 
 CineMosaic only reads: it never changes media, bins or projects. English, German, French and Spanish, dark or light, a built-in manual (Help → CineMosaic Manual), updates from within the app.
 

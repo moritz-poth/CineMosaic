@@ -36,7 +36,7 @@ Si votre image a des bandes noires, choisissez son format sous Planche › Forma
 
 ## La planche
 
-Papier : DIN A0 à A6 ou Personnalisé (largeur × hauteur en mm), portrait ou paysage. Résolution en dpi : 300 pour l’impression, 150 pour l’écran. Marge est le bord vide autour de tout, Espace la place entre deux images, les deux en mm – appuyez dans le champ et faites glisser à gauche ou à droite pour changer la valeur, ou cliquez pour la saisir. Avec Colonnes automatiques, CineMosaic choisit le nombre de colonnes qui rend les images les plus grandes ; désactivez-le pour fixer le nombre vous-même. La ligne en dessous montre la grille, la taille de la planche en pixels et celle d’une image.
+Largeur × hauteur est toujours affiché : choisissez DIN A0 à A6 dans la liste Papier pour le remplir, ou saisissez votre propre format – la liste indique alors Personnalisé (ou le format A correspondant). Portrait ou paysage tourne la planche. Unité fait passer toutes les longueurs – papier, marge, espace, cadre et X et Y du titre – des mm aux pixels ; la taille du texte reste en points. Toutes sont des nombres entiers. Résolution en dpi : 300 pour l’impression, 150 pour l’écran. Marge est le bord vide autour de tout, Espace la place entre deux images – appuyez dans le champ et faites glisser à gauche ou à droite pour changer la valeur, ou cliquez pour la saisir. Avec Colonnes automatiques, CineMosaic choisit le nombre de colonnes qui rend les images les plus grandes ; désactivez-le pour fixer le nombre vous-même. La ligne en dessous montre la grille et la taille d’une image en pixels.
 
 Les très grandes planches (A0 à 600 dpi) demandent beaucoup de mémoire pour l’enregistrement ; la ligne sous la planche indique combien.
 
@@ -44,9 +44,13 @@ Les très grandes planches (A0 à 600 dpi) demandent beaucoup de mémoire pour l
 
 La colonne latérale a quatre onglets : Source, Planche, Cadre et Titre. Sous Cadre, l’option Cadre trace un trait autour de la planche : choisissez un motif (simple, double, épais – fin, fin – épais, fin – épais – fin, deux proches et un écarté), l’épaisseur d’un trait fin, la distance au bord et la couleur (noir au départ ; une pastille ou une valeur hexadécimale comme #3c4146).
 
-Sous Titre, saisissez le titre. La liste des polices montre chaque police de votre Mac avec son propre dessin ; ↑ et ↓ la parcourent et la planche suit aussitôt, une lettre saute à la police suivante qui commence ainsi. Puis taille en points, gras, italique et couleur. L’ancre est le point de la planche auquel le titre est accroché – l’un des neuf, comme dans un logiciel d’image ; X et Y le déplacent depuis là en mm. Vous pouvez aussi faire glisser le titre dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt autour de lui. En haut ou en bas, les images gardent leur distance ; au milieu, il passe par-dessus.
+Sous Titre, saisissez le titre. La liste des polices montre chaque police de votre Mac avec son propre dessin ; ↑ et ↓ la parcourent et la planche suit aussitôt, une lettre saute à la police suivante qui commence ainsi. Puis taille en points, gras, italique et couleur. L’ancre est le point de la planche auquel le titre est accroché – l’un des neuf, comme dans un logiciel d’image ; X et Y le déplacent depuis là en mm ou en pixels. Vous pouvez aussi faire glisser le titre dans l’aperçu. Là où il couvre le cadre, le trait s’interrompt autour de lui. En haut ou en bas, les images gardent leur distance ; au milieu, il passe par-dessus.
 
 Planche › Traits de coupe met la planche en page dans une zone au format de l’image à l’intérieur du papier – pour des images en 2:1, une zone en 2:1 – et place des traits de coupe à ses coins pour la découper.
+
+## Projets
+
+Fichier › Enregistrer le projet (⌘S) garde tout dans un fichier de projet : source, planche, titre et images récupérées. Fichier › Ouvrir un projet… (⌘O), Ouvrir l’élément récent ou un double-clic dans le Finder le rouvre – aussitôt, avec ses images, même si le master, le chutier ou les volumes ne sont pas connectés. CineMosaic relit ensuite la source : si le montage a changé, les plans inchangés gardent leurs images, les nouveaux ou modifiés sont gris et « Récupérer N images manquantes » ne récupère que ceux-là (les images déjà récupérées sont réutilisées). Chaque projet a sa propre fenêtre : Nouveau projet (⌘N) ouvre une nouvelle fenêtre vide, et un projet ouvert reçoit aussi la sienne (une fenêtre vide le prend ; un projet déjà ouvert passe au premier plan). Enregistrer le projet sous… (⇧⌘S) en fait une copie, Fermer la fenêtre (⌘W) en ferme une. Avant de perdre des modifications non enregistrées – fermer une fenêtre ou Quitter – CineMosaic demande s’il faut les enregistrer.
 
 ## Préréglages
 
