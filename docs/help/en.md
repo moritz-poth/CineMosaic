@@ -10,7 +10,7 @@ It works from a Media Composer bin with the Avid MediaFiles of your volumes, or 
 
 At every moment the topmost video track that holds a clip counts – the picture you see. Filler lets the tracks below show through. A clip that is partly covered by a clip on a higher track becomes two shots: before and after the insert. Titles and effects on upper tracks count as picture.
 
-The still is the middle frame of each shot. For a shot of 50 frames that is frame 25.
+The still is the middle frame of each shot. For a shot of 50 frames that is frame 25. If the grid has cells left over in its last row, the longest shots give two stills instead of one – after the first and after the second third (for 90 frames: frames 30 and 60) – until the sheet is full. If you change the sheet after grabbing and it needs stills that are not there yet, they show grey and the button reads "Grab N missing stills": it grabs only those.
 
 ## Master file and cut list
 

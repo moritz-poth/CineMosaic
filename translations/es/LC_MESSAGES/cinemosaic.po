@@ -254,6 +254,9 @@ msgstr "No hay ningún volumen con una carpeta «Avid MediaFiles» conectado."
 msgid "Grab stills again"
 msgstr "Volver a extraer"
 
+msgid "Grab {} missing stills"
+msgstr "Capturar {} fotogramas que faltan"
+
 msgid "Grab stills"
 msgstr "Extraer fotogramas"
 

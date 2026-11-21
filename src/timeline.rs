@@ -90,8 +90,47 @@ pub struct Shot {
 impl Shot {
     /// Record frame of the middle of the shot.
     pub fn middle(&self) -> i64 {
-        self.start + (self.end - self.start) / 2
+        self.at(Part::Middle)
     }
+
+    /// Record frame of `part` of the shot.
+    pub fn at(&self, part: Part) -> i64 {
+        let d = self.end - self.start;
+        self.start
+            + match part {
+                Part::Middle => d / 2,
+                Part::FirstThird => d / 3,
+                Part::SecondThird => d * 2 / 3,
+            }
+    }
+}
+
+/// Where in its shot a still is taken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Part {
+    Middle,
+    /// after the first third
+    FirstThird,
+    /// after the second third
+    SecondThird,
+}
+
+/// One still of the sheet: shot index and where in the shot.
+pub type Pick = (usize, Part);
+
+/// The stills for a grid of `cells`: the middle of every shot; while cells are left over, the longest shots
+/// (the earlier one on a tie) give two stills instead, after the first and after the second third. Cut order is kept.
+pub fn fill(shots: &[Shot], cells: usize) -> Vec<Pick> {
+    let extra = cells.saturating_sub(shots.len()).min(shots.len());
+    let mut longest: Vec<usize> = (0..shots.len()).collect();
+    longest.sort_by_key(|&i| std::cmp::Reverse(shots[i].end - shots[i].start)); // stable: ties keep cut order
+    let mut split = vec![false; shots.len()];
+    for &i in &longest[..extra] {
+        split[i] = true;
+    }
+    (0..shots.len())
+        .flat_map(|i| if split[i] { vec![(i, Part::FirstThird), (i, Part::SecondThird)] } else { vec![(i, Part::Middle)] })
+        .collect()
 }
 
 impl Timeline {
@@ -171,5 +210,18 @@ mod tests {
         };
         let s = &t.shots()[2];
         assert_eq!((s.key, s.item_start, s.start, s.middle()), (7, 0, 60, 80));
+    }
+
+    #[test]
+    fn longest_shots_fill_the_empty_cells_with_thirds() {
+        let shot = |start, end| Shot { name: String::new(), start, end, track: 0, key: 0, item_start: start };
+        // lengths 30, 90, 60, 90: two cells left over go to the two 90-frame shots, the earlier one first on the tie
+        let shots = [shot(0, 30), shot(30, 120), shot(120, 180), shot(180, 270)];
+        use Part::*;
+        assert_eq!(fill(&shots, 6), [(0, Middle), (1, FirstThird), (1, SecondThird), (2, Middle), (3, FirstThird), (3, SecondThird)]);
+        assert_eq!(fill(&shots, 5), [(0, Middle), (1, FirstThird), (1, SecondThird), (2, Middle), (3, Middle)]);
+        assert_eq!(fill(&shots, 4), fill(&shots, 0));
+        assert_eq!(fill(&shots, 99).len(), 8); // never more than two per shot
+        assert_eq!((shots[1].at(FirstThird), shots[1].at(SecondThird), shots[1].middle()), (60, 90, 75));
     }
 }

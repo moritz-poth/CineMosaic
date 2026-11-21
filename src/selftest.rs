@@ -50,7 +50,7 @@ fn middle_frame(base: &Path) -> Result<String, Failed> {
     let edl = base.join("cut.edl");
     io(fs::write(&edl, "TITLE: T\nFCM: NON-DROP FRAME\n001  AX V C 00:00:00:00 00:00:03:00 01:00:02:00 01:00:05:00\n"))?;
     let shots = io(read_cut_list(&edl, info.rate))?.shots();
-    let stills = crate::grab_stills(&master_jobs(&shots, &master, &info, "en"), &base.join("stills"), &Gate::default(), &|_, _| {}).ok_or(Failed::Fail("cancelled".into()))?;
+    let stills = crate::grab_stills(&master_jobs(&shots, &crate::timeline::fill(&shots, 0), &master, &info, "en"), &base.join("stills"), &Gate::default(), &|_, _| {}).ok_or(Failed::Fail("cancelled".into()))?;
     let still = stills.first().and_then(|s| s.as_ref().ok()).ok_or(Failed::Fail("no still".into()))?;
     let got = io(image::open(still))?.to_rgb8().get_pixel(5, 5)[0] as i64;
     // 01:00:02:00 + 75 / 2 frames, 50 + 37 into the video

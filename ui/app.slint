@@ -1503,6 +1503,8 @@ export component AppWindow inherits SheetWindow {
     in property <string> time-left;
     in property <bool> paused;
     in property <bool> can-grab;
+    // stills the sheet needs that were not grabbed yet (the sheet changed after grabbing)
+    in property <int> missing;
     // sheet (index into the paper list: 0 custom, 1.. A0..A6)
     in-out property <int> paper: 5;
     // picture format: 0 full frame (no crop), 1..7 the formats in layout::PICTURE, 8 custom
@@ -1678,8 +1680,9 @@ export component AppWindow inherits SheetWindow {
                         padding-top: 4px;
                         alignment: start;
                         CheckButton {
-                            text: root.state == 2 ? @tr("Grab stills again") : @tr("Grab stills");
-                            primary: root.state != 2;
+                            text: root.state == 2 && root.missing > 0 ? @tr("Grab {} missing stills", root.missing)
+                                : root.state == 2 ? @tr("Grab stills again") : @tr("Grab stills");
+                            primary: root.state != 2 || root.missing > 0;
                             enabled: root.can-grab;
                             clicked => { root.grab(); }
                         }

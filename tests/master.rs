@@ -29,7 +29,7 @@ fn grabs_the_exact_middle_frame_of_every_shot() {
     )
     .unwrap();
     let shots = read_cut_list(&edl, info.rate).unwrap().shots();
-    let jobs = master_jobs(&shots, &master, &info, "en");
+    let jobs = master_jobs(&shots, &cinemosaic::timeline::fill(&shots, 0), &master, &info, "en");
     let stills = grab_stills(&jobs, &dir.join("s"), &Gate::default(), &|_, _| {}).unwrap();
     // middles: 0 + 50/2 = 25, 50, 100 + 175/2 = 187
     let got: Vec<u32> = stills

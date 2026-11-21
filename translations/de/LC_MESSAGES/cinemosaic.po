@@ -254,6 +254,9 @@ msgstr "Kein Volume mit einem Ordner „Avid MediaFiles“ ist angeschlossen."
 msgid "Grab stills again"
 msgstr "Stills neu holen"
 
+msgid "Grab {} missing stills"
+msgstr "{} fehlende Stills holen"
+
 msgid "Grab stills"
 msgstr "Stills holen"
 

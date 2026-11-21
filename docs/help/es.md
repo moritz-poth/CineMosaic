@@ -10,7 +10,7 @@ Trabaja con un bin de Media Composer y las Avid MediaFiles de tus volúmenes, o 
 
 En cada momento cuenta la pista de vídeo más alta que tiene un clip: la imagen que ves. El relleno deja ver las pistas de abajo. Un clip cubierto en parte por un clip de una pista más alta da dos planos: antes y después del inserto. Los títulos y efectos en pistas superiores cuentan como imagen.
 
-El fotograma es el del centro de cada plano. En un plano de 50 fotogramas es el fotograma 25.
+El fotograma es el del centro de cada plano. En un plano de 50 fotogramas es el fotograma 25. Si quedan celdas libres en la última fila, los planos más largos dan dos fotogramas en lugar de uno – tras el primer y tras el segundo tercio (con 90 fotogramas: los fotogramas 30 y 60) – hasta llenar la hoja. Si cambias la hoja después de capturar y necesita fotogramas que aún faltan, aparecen en gris y el botón dice «Capturar N fotogramas que faltan»: captura solo esos.
 
 ## Máster y lista de montaje
 

@@ -7,6 +7,7 @@ slint::include_modules!();
 use image::RgbImage;
 use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,9 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use slint::{ModelRc, SharedString, VecModel};
 use cinemosaic::bin::{BinCut, sequences};
-use cinemosaic::timeline::{Rate, Shot, Timeline, format_tc};
+use cinemosaic::timeline::{Pick, Rate, Shot, Timeline, format_tc};
 use cinemosaic::report::{self, Outcome, Report};
-use cinemosaic::{Gate, UPDATE_APP, avb, export, frames, grab_stills, layout, log, master_jobs, media, pick, read_cut_list, selftest, update};
+use cinemosaic::{Gate, UPDATE_APP, avb, export, frames, grab_stills, layout, log, master_jobs, media, pick, picks, read_cut_list, selftest, update};
 
 /// Long side of the preview image in pixels (twice the on-screen size for Retina).
 const PREVIEW_PX: f64 = 1800.0;
@@ -29,9 +30,12 @@ struct State {
     list: Option<PathBuf>,
     timeline: Option<Timeline>,
     shots: Vec<Shot>,
-    /// full-size stills on disk (export) and small copies (preview); empty until grabbed
-    stills: Vec<Result<PathBuf, String>>,
-    thumbs: Arc<Vec<Option<RgbImage>>>,
+    /// full-size stills on disk (export) and small copies (preview), by shot and place in the shot; a sheet change
+    /// can need stills not grabbed yet: they stay grey until "Grab stills" fetches just those
+    stills: HashMap<Pick, Result<PathBuf, String>>,
+    thumbs: Arc<HashMap<Pick, RgbImage>>,
+    /// grabs since the source was chosen: each writes into its own folder
+    grabs: usize,
     gate: Arc<Gate>,
     saved: Option<PathBuf>,
     /// bin mode: the bin, the chosen sequence read from it, volumes (switched on or off)
@@ -52,6 +56,10 @@ impl State {
     }
     fn rate(&self) -> Rate {
         self.timeline.as_ref().map_or(Rate { num: 25, den: 1 }, |t| t.rate)
+    }
+    /// The stills that fill the sheet as it is set now.
+    fn picks(&self, sheet: &layout::Sheet, picture: Option<f64>) -> Vec<Pick> {
+        picks(&self.shots, sheet, picture.unwrap_or(self.frame_aspect()))
     }
 }
 
@@ -791,7 +799,11 @@ fn refresh(app: &AppWindow) {
     app.set_page_aspect((sheet.width_mm / sheet.height_mm) as f32);
     STATE.with(|st| {
         let st = st.borrow();
-        let n = st.shots.len();
+        let picks = st.picks(&sheet, picture);
+        let n = picks.len();
+        // grabbed but not complete: the sheet changed and needs stills that were not grabbed yet
+        let missing = if st.stills.is_empty() { 0 } else { picks.iter().filter(|p| !st.stills.contains_key(p)).count() };
+        app.set_missing(missing as i32);
         let aspect = picture.unwrap_or(st.frame_aspect());
         let (w, h) = sheet.size_px();
         let mut info = format!("{w} × {h} px");
@@ -820,7 +832,7 @@ fn refresh(app: &AppWindow) {
         let long = (PREVIEW_PX * app.get_zoom() as f64).min(real).clamp(PREVIEW_PX, 8000.0);
         let mut small = sheet.clone();
         small.dpi = long / (sheet.width_mm.max(sheet.height_mm) / 25.4);
-        let job = RenderJob { sheet: small, n, aspect, picture, thumbs: st.thumbs.clone(), generation: RENDER_GEN.fetch_add(1, Ordering::Relaxed) + 1 };
+        let job = RenderJob { sheet: small, picks, aspect, picture, thumbs: st.thumbs.clone(), generation: RENDER_GEN.fetch_add(1, Ordering::Relaxed) + 1 };
         RENDERER.with(|r| {
             let mut r = r.borrow_mut();
             if r.is_none() {
@@ -836,10 +848,10 @@ fn refresh(app: &AppWindow) {
 /// One preview to draw; only the newest one (`generation`) is shown.
 struct RenderJob {
     sheet: layout::Sheet,
-    n: usize,
+    picks: Vec<Pick>,
     aspect: f64,
     picture: Option<f64>,
-    thumbs: Arc<Vec<Option<RgbImage>>>,
+    thumbs: Arc<HashMap<Pick, RgbImage>>,
     generation: usize,
 }
 
@@ -858,7 +870,7 @@ fn start_renderer(weak: slint::Weak<AppWindow>) -> std::sync::mpsc::Sender<Rende
             while let Ok(newer) = rx.try_recv() {
                 job = newer;
             }
-            let page = layout::render(&job.sheet, job.n, job.aspect, |i| job.thumbs.get(i).and_then(|t| t.clone()).map(|t| cropped(t, job.picture)));
+            let page = layout::render(&job.sheet, job.picks.len(), job.aspect, |i| job.thumbs.get(&job.picks[i]).map(|t| cropped(t.clone(), job.picture)));
             if job.generation != RENDER_GEN.load(Ordering::Relaxed) {
                 continue; // a newer one is waiting
             }
@@ -880,6 +892,7 @@ fn start_renderer(weak: slint::Weak<AppWindow>) -> std::sync::mpsc::Sender<Rende
 fn clear_source(app: &AppWindow, st: &mut State) {
     st.stills.clear();
     st.thumbs = Arc::default();
+    st.grabs = 0;
     st.shots.clear();
     st.timeline = None;
     st.cut = None;
@@ -955,15 +968,24 @@ fn time_left(start: Instant, done: usize, total: usize) -> String {
     }
 }
 
+/// Grabs the stills the sheet needs that are not there yet; when none are missing, all of them again.
 fn grab(app: &AppWindow) {
-    let (shots, master, cut, volumes, rate, gate) = STATE.with(|st| {
+    let Ok((sheet, picture)) = read_all(app) else { return };
+    let (shots, wanted, fresh, master, cut, volumes, rate, gate, dir) = STATE.with(|st| {
         let mut st = st.borrow_mut();
-        st.stills.clear();
-        st.thumbs = Arc::default();
-        st.still_aspect = None;
+        let all = st.picks(&sheet, picture);
+        let missing: Vec<Pick> = all.iter().filter(|p| !st.stills.contains_key(p)).copied().collect();
+        let fresh = missing.is_empty() || st.stills.is_empty();
+        if fresh {
+            st.stills.clear();
+            st.thumbs = Arc::default();
+            st.still_aspect = None;
+        }
         st.gate = Arc::default();
+        st.grabs += 1;
         let volumes: Vec<PathBuf> = st.volumes.iter().filter(|v| v.1).map(|v| v.0.clone()).collect();
-        (st.shots.clone(), st.master.clone(), st.cut.clone(), volumes, st.rate(), st.gate.clone())
+        let dir = cache_dir().join(format!("grab-{}", st.grabs));
+        (st.shots.clone(), if fresh { all } else { missing }, fresh, st.master.clone(), st.cut.clone(), volumes, st.rate(), st.gate.clone(), dir)
     });
     let bin_mode = app.get_mode() == 1;
     if (bin_mode && cut.is_none()) || (!bin_mode && master.is_none()) {
@@ -981,12 +1003,13 @@ fn grab(app: &AppWindow) {
     let weak = app.as_weak();
     std::thread::spawn(move || {
         let jobs = match (&cut, &master) {
-            (Some(cut), _) if bin_mode => cut.jobs(&shots, &volumes, &|| gate.go(), LANGUAGES[LANG.load(Ordering::Relaxed)].0),
-            (_, Some((path, info))) => master_jobs(&shots, path, info, LANGUAGES[LANG.load(Ordering::Relaxed)].0),
+            (Some(cut), _) if bin_mode => cut.jobs(&shots, &wanted, &volumes, &|| gate.go(), LANGUAGES[LANG.load(Ordering::Relaxed)].0),
+            (_, Some((path, info))) => master_jobs(&shots, &wanted, path, info, LANGUAGES[LANG.load(Ordering::Relaxed)].0),
             _ => return,
         };
-        let dir = cache_dir();
-        let _ = std::fs::remove_dir_all(&dir); // stills of an earlier run
+        if fresh {
+            let _ = std::fs::remove_dir_all(cache_dir()); // stills of an earlier run
+        }
         let start = Instant::now();
         let progress = |done: usize, total: usize| {
             let (weak, left) = (weak.clone(), time_left(start, done, total));
@@ -1006,10 +1029,10 @@ fn grab(app: &AppWindow) {
             let Some(app) = weak.upgrade() else { return };
             match (stills, thumbs) {
                 (Some(stills), Some(Some(thumbs))) => {
-                    let failed: Vec<String> = shots
+                    let failed: Vec<String> = wanted
                         .iter()
                         .zip(&stills)
-                        .filter_map(|(s, r)| r.as_ref().err().map(|e| format!("{} {}: {e}", format_tc(s.middle(), rate), s.name)))
+                        .filter_map(|(&(i, part), r)| r.as_ref().err().map(|e| format!("{} {}: {e}", format_tc(shots[i].at(part), rate), shots[i].name)))
                         .collect();
                     if !failed.is_empty() {
                         app.set_source_error(
@@ -1021,13 +1044,16 @@ fn grab(app: &AppWindow) {
                     }
                     STATE.with(|st| {
                         let mut st = st.borrow_mut();
-                        st.stills = stills;
-                        st.thumbs = Arc::new(thumbs);
-                        st.still_aspect = still_aspect;
+                        let mut all = (*st.thumbs).clone();
+                        all.extend(wanted.iter().zip(thumbs).filter_map(|(p, t)| Some((*p, t?))));
+                        st.thumbs = Arc::new(all);
+                        st.stills.extend(wanted.iter().copied().zip(stills));
+                        st.still_aspect = st.still_aspect.or(still_aspect);
                     });
                     app.set_state(2);
                 }
-                _ => app.set_state(0), // cancelled: nothing kept
+                // cancelled: the stills of earlier grabs stay
+                _ => app.set_state(if STATE.with(|st| st.borrow().stills.is_empty()) { 0 } else { 2 }),
             }
             refresh(&app);
         });
@@ -1142,7 +1168,8 @@ fn save(app: &AppWindow) {
         let st = st.borrow();
         let name = st.timeline.as_ref().map(|t| t.name.trim().to_string()).filter(|n| !n.is_empty());
         let name = name.or_else(|| st.list.as_ref().or(st.bin.as_ref()).and_then(|l| l.file_stem()).map(|s| s.to_string_lossy().into_owned()));
-        (st.stills.clone(), picture.unwrap_or(st.frame_aspect()), name.unwrap_or_else(|| "CineMosaic".into()))
+        let stills: Vec<Option<PathBuf>> = st.picks(&sheet, picture).iter().map(|p| st.stills.get(p).and_then(|r| r.as_ref().ok()).cloned()).collect();
+        (stills, picture.unwrap_or(st.frame_aspect()), name.unwrap_or_else(|| "CineMosaic".into()))
     });
     // "/" and ":" are not allowed in a file name
     let name = name.replace(['/', ':'], "-");
@@ -1158,7 +1185,7 @@ fn save(app: &AppWindow) {
     app.set_export_status(tr(["Drawing the sheet…", "Zeichne den Bogen…", "Dessin de la planche…", "Dibujando la hoja…"]).into());
     let weak = app.as_weak();
     std::thread::spawn(move || {
-        let page = layout::render(&sheet, stills.len(), aspect, |i| stills[i].as_ref().ok().and_then(|p| image::open(p).ok()).map(|i| cropped(i.to_rgb8(), picture)));
+        let page = layout::render(&sheet, stills.len(), aspect, |i| stills[i].as_ref().and_then(|p| image::open(p).ok()).map(|i| cropped(i.to_rgb8(), picture)));
         let result = export::save(&page, &path, sheet.dpi, format);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(app) = weak.upgrade() else { return };

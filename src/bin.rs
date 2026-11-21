@@ -2,7 +2,7 @@
 //! media file and frame its middle shows.
 
 use crate::avb::{Bin, Hit, MobId, MobKind};
-use crate::timeline::{Item, Rate, Shot, Timeline, Track};
+use crate::timeline::{Item, Pick, Rate, Shot, Timeline, Track};
 use crate::{Job, media};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -193,10 +193,10 @@ impl BinCut {
         self.bin.resolve(part, at - raw, &self.others)
     }
 
-    /// The still of every shot: its middle frame in the media file, found on `volumes`.
-    pub fn jobs(&self, shots: &[Shot], volumes: &[PathBuf], go: &dyn Fn() -> bool, lang: &str) -> Vec<Result<Job, String>> {
+    /// Each picked still: its frame in the media file, found on `volumes`.
+    pub fn jobs(&self, shots: &[Shot], picks: &[Pick], volumes: &[PathBuf], go: &dyn Fn() -> bool, lang: &str) -> Vec<Result<Job, String>> {
         let say = |clip: &str, t: [&str; 4]| format!("{clip}: {}", crate::pick(lang, t));
-        let hits: Vec<Hit> = shots.iter().map(|s| self.hit(s.key, s.item_start, s.middle())).collect();
+        let hits: Vec<Hit> = picks.iter().map(|&(i, part)| self.hit(shots[i].key, shots[i].item_start, shots[i].at(part))).collect();
         let wanted: HashSet<MobId> = hits.iter().filter_map(|h| if let Hit::Media { file, .. } = h { Some(*file) } else { None }).collect();
         let paths = media::locate(volumes, &wanted, go);
         hits.into_iter()

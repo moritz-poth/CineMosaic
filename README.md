@@ -9,7 +9,7 @@ Takes one still from the middle of every shot of a cut and lays them out on one 
 ## What it does
 
 - **Two sources.** A Media Composer bin with the Avid MediaFiles of your volumes – CineMosaic follows every shot of the sequence through effects, motion effects, multicam and nests to its media file, also into other bins of the project and to AMA-linked files. Or a master file of the cut with its cut list: EDL (CMX3600), Final Cut Pro 7 XML, FCPXML or AAF.
-- **What you see.** At every moment the topmost video track with a clip counts; filler lets the tracks below show through. A clip partly covered from above becomes two shots. The still is the middle frame of each shot.
+- **What you see.** At every moment the topmost video track with a clip counts; filler lets the tracks below show through. A clip partly covered from above becomes two shots. The still is the middle frame of each shot. Cells left over in the last row are filled with a second still from the longest shots (after the first and the second third).
 - **Picture format.** Black bars are cut off for 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 or any format of your own.
 - **The sheet.** DIN A0–A6 or your own size, portrait or landscape, resolution in dpi, margin and gap in mm, columns automatic (largest stills) or fixed. A live preview shows the sheet as you set it up.
 - **Saving.** PNG, TIFF and JPEG with the resolution in the file, PDF in the paper size.

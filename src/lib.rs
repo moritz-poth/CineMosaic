@@ -38,7 +38,7 @@ pub fn pick<'a>(lang: &str, [en, de, fr, es]: [&'a str; 4]) -> &'a str {
     }
 }
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use timeline::{Rate, Shot, Timeline};
+use timeline::{Pick, Rate, Shot, Timeline};
 
 /// Reads a cut list by its extension. EDLs carry no frame rate: `rate` (the master's) is used.
 pub fn read_cut_list(path: &Path, rate: Rate) -> Result<Timeline, String> {
@@ -56,11 +56,17 @@ pub fn read_cut_list(path: &Path, rate: Rate) -> Result<Timeline, String> {
     }
 }
 
-/// Still of each shot in master mode: the record frame of the shot's middle minus the master's start timecode.
-pub fn master_jobs(shots: &[Shot], master: &Path, info: &frames::VideoInfo, lang: &str) -> Vec<Result<Job, String>> {
-    shots
+/// The stills that fill `sheet`'s grid for stills of width/height `aspect` (see `timeline::fill`).
+pub fn picks(shots: &[Shot], sheet: &layout::Sheet, aspect: f64) -> Vec<Pick> {
+    let g = sheet.grid(shots.len(), aspect);
+    timeline::fill(shots, (g.cols * g.rows) as usize)
+}
+
+/// Each picked still in master mode: its record frame minus the master's start timecode.
+pub fn master_jobs(shots: &[Shot], picks: &[Pick], master: &Path, info: &frames::VideoInfo, lang: &str) -> Vec<Result<Job, String>> {
+    picks
         .iter()
-        .map(|s| match s.middle() - info.start_tc {
+        .map(|&(i, part)| match shots[i].at(part) - info.start_tc {
             f if f >= 0 => Ok(Job { file: master.to_path_buf(), frame: f, rate: info.rate }),
             _ => Err(pick(lang, ["the shot lies before the master file’s start timecode", "der Shot liegt vor dem Start-Timecode des Masters", "le plan se trouve avant le timecode de début du master", "el plano queda antes del timecode inicial del máster"]).into()),
         })

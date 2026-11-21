@@ -1,6 +1,6 @@
 //! Command line for testing the core: cinemosaic <master> <cut list> <out.png|tif|jpg|pdf> [options]
 
-use cinemosaic::{Gate, Job, avb, bin, export, frames, grab_stills, layout, master_jobs, read_cut_list};
+use cinemosaic::{Gate, Job, avb, bin, export, frames, grab_stills, layout, master_jobs, picks, read_cut_list};
 use std::path::PathBuf;
 
 fn main() {
@@ -54,7 +54,7 @@ fn run() -> Result<(), String> {
         (sheet.width_mm, sheet.height_mm) = (sheet.height_mm.max(sheet.width_mm), sheet.height_mm.min(sheet.width_mm));
     }
     let tc = |f: i64, r| cinemosaic::timeline::format_tc(f, r);
-    let (shots, jobs, rate) = if bin_mode {
+    let (shots, picks, jobs, rate) = if bin_mode {
         let b = avb::Bin::read(&master)?;
         let names = bin::sequences(&b);
         for (i, n) in names.iter().enumerate() {
@@ -63,23 +63,27 @@ fn run() -> Result<(), String> {
         let cut = bin::BinCut::open(&master, b, seq, &|| true)?;
         let shots = cut.shots();
         let volumes: Vec<PathBuf> = list.to_string_lossy().split(':').map(PathBuf::from).collect();
-        let jobs = cut.jobs(&shots, &volumes, &|| true, "en");
-        (shots, jobs, cut.rate())
+        // shortcut: the bin gives no frame size before grabbing, so the grid is planned for 16:9 (or --picture)
+        let picks = picks(&shots, &sheet, picture.unwrap_or(16.0 / 9.0));
+        let jobs = cut.jobs(&shots, &picks, &volumes, &|| true, "en");
+        (shots, picks, jobs, cut.rate())
     } else {
         let info = frames::probe(&master)?;
         let shots = read_cut_list(&list, info.rate)?.shots();
         eprintln!("master starts at {}", tc(info.start_tc, info.rate));
-        let jobs = master_jobs(&shots, &master, &info, "en");
-        (shots, jobs, info.rate)
+        let picks = picks(&shots, &sheet, picture.unwrap_or(info.aspect));
+        let jobs = master_jobs(&shots, &picks, &master, &info, "en");
+        (shots, picks, jobs, info.rate)
     };
-    eprintln!("{} shots", shots.len());
+    eprintln!("{} shots, {} stills", shots.len(), picks.len());
     if list_only {
-        for (s, j) in shots.iter().zip(&jobs) {
+        for (&(i, part), j) in picks.iter().zip(&jobs) {
+            let s = &shots[i];
             let what = match j {
                 Ok(Job { file, frame, .. }) => format!("{} frame {frame}", file.file_name().unwrap_or_default().to_string_lossy()),
                 Err(e) => format!("ERROR {e}"),
             };
-            println!("V{} {} - {} mid {}  {}  -> {what}", s.track + 1, tc(s.start, rate), tc(s.end, rate), tc(s.middle(), rate), s.name);
+            println!("V{} {} - {} {part:?} {}  {}  -> {what}", s.track + 1, tc(s.start, rate), tc(s.end, rate), tc(s.at(part), rate), s.name);
         }
         return Ok(());
     }
@@ -87,9 +91,9 @@ fn run() -> Result<(), String> {
     let gate = Gate::default();
     let stills = grab_stills(&jobs, &dir, &gate, &|d, t| eprint!("\r{d}/{t}")).ok_or("cancelled")?;
     eprintln!();
-    for (s, r) in shots.iter().zip(&stills) {
+    for (&(i, part), r) in picks.iter().zip(&stills) {
         if let Err(e) = r {
-            eprintln!("{} {}: {e}", tc(s.middle(), rate), s.name);
+            eprintln!("{} {}: {e}", tc(shots[i].at(part), rate), shots[i].name);
         }
     }
     let first = stills.iter().find_map(|r| r.as_ref().ok().and_then(|p| image::image_dimensions(p).ok()));

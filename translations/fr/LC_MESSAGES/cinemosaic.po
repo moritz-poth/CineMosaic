@@ -254,6 +254,9 @@ msgstr "Aucun volume avec un dossier « Avid MediaFiles » n’est connecté."
 msgid "Grab stills again"
 msgstr "Reprendre les images"
 
+msgid "Grab {} missing stills"
+msgstr "Récupérer {} images manquantes"
+
 msgid "Grab stills"
 msgstr "Extraire les images"
 

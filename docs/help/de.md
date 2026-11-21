@@ -10,7 +10,7 @@ Es arbeitet mit einem Media-Composer-Bin und den Avid MediaFiles deiner Volumes,
 
 In jedem Moment zählt die oberste Videospur, auf der ein Clip liegt – also das Bild, das du siehst. Füller ist durchsichtig, darunter liegende Spuren scheinen durch. Ein Clip, der teilweise von einem Clip auf einer höheren Spur verdeckt wird, ergibt zwei Shots: vor und nach dem Insert. Titel und Effekte auf oberen Spuren zählen als Bild.
 
-Das Still ist der mittlere Frame jedes Shots. Bei einem Shot von 50 Frames ist das Frame 25.
+Das Still ist der mittlere Frame jedes Shots. Bei einem Shot von 50 Frames ist das Frame 25. Bleiben in der letzten Reihe Felder frei, geben die längsten Shots statt einem zwei Stills – nach dem ersten und nach dem zweiten Drittel (bei 90 Frames: Frame 30 und 60) –, bis der Bogen voll ist. Änderst du den Bogen nach dem Holen und er braucht Stills, die noch fehlen, sind sie grau und der Knopf heißt „N fehlende Stills holen“: Er holt nur diese.
 
 ## Masterfile und Schnittliste
 

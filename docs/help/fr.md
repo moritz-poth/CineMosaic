@@ -10,7 +10,7 @@ Il travaille à partir d’un chutier Media Composer et des Avid MediaFiles de v
 
 À chaque instant, c’est la piste vidéo la plus haute contenant un clip qui compte – l’image que vous voyez. Le remplissage laisse voir les pistes du dessous. Un clip partiellement couvert par un clip sur une piste plus haute donne deux plans : avant et après l’insert. Les titres et effets sur les pistes supérieures comptent comme image.
 
-L’image retenue est l’image du milieu de chaque plan. Pour un plan de 50 images, c’est l’image 25.
+L’image retenue est l’image du milieu de chaque plan. Pour un plan de 50 images, c’est l’image 25. S’il reste des cases libres dans la dernière rangée, les plans les plus longs donnent deux images au lieu d’une – après le premier et après le deuxième tiers (pour 90 images : images 30 et 60) – jusqu’à ce que la planche soit pleine. Si vous modifiez la planche après la récupération et qu’elle demande des images absentes, elles restent grises et le bouton indique « Récupérer N images manquantes » : il ne récupère que celles-là.
 
 ## Fichier master et liste de montage
 
