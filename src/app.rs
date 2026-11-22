@@ -655,7 +655,8 @@ fn read_sheet(app: &AppWindow) -> Result<layout::Sheet, &'static str> {
     let w = length(&app.get_custom_w(), per, 10.0, 5000.0, "width")?;
     let h = length(&app.get_custom_h(), per, 10.0, 5000.0, "height")?;
     // margin and gap always in px of the sheet (user 2026-11-22)
-    let margin = length(&app.get_margin(), 25.4 / dpi, 0.0, w.min(h) / 2.0 - 1.0, "margin")?;
+    // negative: the stills run off the page (they fill it to the edges, the overhang is cut off)
+    let margin = length(&app.get_margin(), 25.4 / dpi, -w.min(h), w.min(h) / 2.0 - 1.0, "margin")?;
     let gap = length(&app.get_gap(), 25.4 / dpi, 0.0, 500.0, "gap")?;
     let columns = if app.get_auto_cols() { None } else { Some(num(&app.get_cols(), 1.0, 1000.0, "columns")? as u32) };
     Ok(layout::Sheet { width_mm: w, height_mm: h, dpi, margin_mm: margin, gap_mm: gap, columns, ..Default::default() })
@@ -1010,10 +1011,12 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
             picture_edited(app);
         }
     } else {
-        // presets from before: 1–7 = the film formats as now, 8 = Custom "2.39" or "21:9"
+        // presets from before: 1–7 = the film formats of then, 8 = Custom "2.39" or "21:9"
+        const THEN: [&str; 7] = ["4:3", "1.66:1", "16:9", "1.85:1", "2:1", "2.35:1", "2.39:1"];
         int("picture", 8, &|n| app.set_picture(n));
-        if app.get_picture() == 8 {
-            let c = field("custom-aspect").unwrap_or_else(|| "2.39".into());
+        let then = app.get_picture() as usize;
+        if then > 0 {
+            let c = THEN.get(then - 1).map(|s| s.to_string()).unwrap_or_else(|| field("custom-aspect").unwrap_or_else(|| "2.39".into()));
             app.set_aspect(if c.contains(':') { c } else { format!("{c}:1") }.into());
             picture_edited(app);
         }
@@ -1150,8 +1153,8 @@ fn show_picture(app: &AppWindow) {
     let (w, h) = match i {
         0 => {
             let a = with_state(app, |st| st.borrow().frame_aspect());
-            // 16:9 material reads as 16:9, anything else as x:1
-            if (a - 16.0 / 9.0).abs() < 0.005 { (16.0, 9.0) } else { (a, 1.0) }
+            // the name the format goes by (2048 × 858 is 2.39:1, not 2.387:1), anything else as x:1
+            layout::nominal(a).unwrap_or((a, 1.0))
         }
         i if i <= layout::PICTURE.len() => layout::PICTURE[i - 1],
         _ => return, // Custom keeps what is typed

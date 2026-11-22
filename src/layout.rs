@@ -302,19 +302,40 @@ impl Grid {
     }
 
     /// Cell of still `i` as whole pixels (x, y, w, h): the `i`-th free grid position. Neighbouring cells share their
-    /// edge pixel when the gap is 0.
-    pub fn cell(&self, i: usize) -> (u32, u32, u32, u32) {
+    /// edge pixel when the gap is 0. x and y can be below 0: with a negative margin the stills run off the page.
+    pub fn cell(&self, i: usize) -> (i64, i64, u32, u32) {
         let k = if self.keep_out.is_some() { (0..).filter(|&k| self.free(k)).nth(i).unwrap_or(i as u32) } else { i as u32 };
         let (c, r) = (k % self.cols, k / self.cols);
         let x = self.x + c as f64 * (self.cell_w + self.gap);
         let y = self.y + r as f64 * (self.cell_h + self.gap);
-        let (x0, y0) = (x.round() as u32, y.round() as u32);
-        (x0, y0, ((x + self.cell_w).round() as u32 - x0).max(1), ((y + self.cell_h).round() as u32 - y0).max(1))
+        let (x0, y0) = (x.round() as i64, y.round() as i64);
+        (x0, y0, ((x + self.cell_w).round() as i64 - x0).max(1) as u32, ((y + self.cell_h).round() as i64 - y0).max(1) as u32)
     }
 }
 
 /// Film formats offered for cropping, as width : height (presets store the index).
-pub const PICTURE: [(f64, f64); 7] = [(4.0, 3.0), (1.66, 1.0), (16.0, 9.0), (1.85, 1.0), (2.0, 1.0), (2.35, 1.0), (2.39, 1.0)];
+pub const PICTURE: [(f64, f64); 9] = [(4.0, 3.0), (1.66, 1.0), (16.0, 9.0), (1.85, 1.0), (1.9, 1.0), (2.0, 1.0), (2.35, 1.0), (2.39, 1.0), (2.4, 1.0)];
+
+/// Formats as the film world names them, with the ratio they really have where it differs: DCI Scope is 2048 × 858
+/// / 4096 × 1716 = 2.387 and is called 2.39:1, the DCI container 2048 × 1080 / 4096 × 2160 = 1.896 is called 1.90:1.
+const NOMINAL: [(f64, (f64, f64)); 10] = [
+    (4.0 / 3.0, (4.0, 3.0)),
+    (1.66, (1.66, 1.0)),
+    (16.0 / 9.0, (16.0, 9.0)),
+    (1.85, (1.85, 1.0)),
+    (256.0 / 135.0, (1.9, 1.0)),
+    (2.0, (2.0, 1.0)),
+    (2.2, (2.2, 1.0)),
+    (2.35, (2.35, 1.0)),
+    (2048.0 / 858.0, (2.39, 1.0)),
+    (2.4, (2.4, 1.0)),
+];
+
+/// The named format a picture of width / height `aspect` is (as width : height), if it is within the rounding of a
+/// pixel row of one: 2048 × 858 → 2.39:1, 1920 × 804 → 2.39:1, 1920 × 800 → 2.4:1, 1998 × 1080 → 1.85:1.
+pub fn nominal(aspect: f64) -> Option<(f64, f64)> {
+    NOMINAL.iter().map(|&(a, n)| ((a - aspect).abs(), n)).filter(|&(d, _)| d < 0.006).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, n)| n)
+}
 
 /// Social media sizes for the paper list, in pixels, with the platforms that use them ("" = square).
 pub const SOCIAL: [(u32, u32, &str); 7] = [
@@ -469,7 +490,7 @@ fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32
     for i in 0..n {
         let (x, y, cw, ch) = grid.cell(i);
         let tile = tile(i, cw, ch).unwrap_or_else(|| RgbImage::from_pixel(cw, ch, Rgb([200, 200, 200])));
-        imageops::overlay(&mut page, &tile, x as i64, y as i64);
+        imageops::overlay(&mut page, &tile, x, y);
     }
     if let (Some((outer, t)), Some(l)) = (plan.line, &sheet.line) {
         // the headline cuts a gap into every strand it covers
@@ -556,6 +577,7 @@ mod tests {
         let g = s.grid(40, 1.85);
         let (x0, y0, _, _) = g.cell(0);
         let (x1, y1, w1, h1) = g.cell(34); // last full row, last column
+        let (x0, y0, x1, y1) = (x0 as u32, y0 as u32, x1 as u32, y1 as u32);
         for y in y0..y1 + h1 {
             for x in x0..x1 + w1 {
                 assert_eq!(page.get_pixel(x, y), &Rgb([255, 0, 0]), "white at {x},{y}");
@@ -653,6 +675,54 @@ mod tests {
     }
 
     #[test]
+    fn picture_sizes_get_the_names_the_film_world_uses() {
+        let name = |w: f64, h: f64| nominal(w / h).map(|(a, b)| format!("{}:{}", ratio_text(a), ratio_text(b)));
+        for (w, h, n) in [
+            // DCI (SMPTE ST 428-1): full container, Flat, Scope in 2K and 4K
+            (2048.0, 1080.0, "1.9:1"),
+            (4096.0, 2160.0, "1.9:1"),
+            (1998.0, 1080.0, "1.85:1"),
+            (3996.0, 2160.0, "1.85:1"),
+            (2048.0, 858.0, "2.39:1"),
+            (4096.0, 1716.0, "2.39:1"),
+            // HD / UHD / 8K and letterboxed masters in them
+            (1280.0, 720.0, "16:9"),
+            (1920.0, 1080.0, "16:9"),
+            (3840.0, 2160.0, "16:9"),
+            (7680.0, 4320.0, "16:9"),
+            (1920.0, 1038.0, "1.85:1"),
+            (3840.0, 2076.0, "1.85:1"),
+            (1920.0, 960.0, "2:1"),
+            (3840.0, 1920.0, "2:1"),
+            (1920.0, 817.0, "2.35:1"),
+            (1920.0, 804.0, "2.39:1"),
+            (3840.0, 1608.0, "2.39:1"),
+            (1920.0, 800.0, "2.4:1"),
+            (3840.0, 1600.0, "2.4:1"),
+            (1440.0, 1080.0, "4:3"),
+        ] {
+            assert_eq!(name(w, h).as_deref(), Some(n), "{w} × {h}");
+        }
+        assert_eq!(nominal(2.1), None);
+    }
+
+    #[test]
+    fn a_negative_margin_runs_the_stills_off_the_page() {
+        // 10 px per mm; margin -20 mm: the area is 40 mm larger than the page each way
+        let s = Sheet { margin_mm: -20.0, gap_mm: 0.0, ..a4(Some(2)) };
+        let a = s.plan().area;
+        assert!((a.x + 200.0).abs() < 1e-9 && (a.w - 2500.0).abs() < 1e-9);
+        let g = s.grid(4, 1.0);
+        let (x, y, _, _) = g.cell(0);
+        assert!(x < 0 || y < 0, "first cell starts off the page");
+        let page = render(&s, 4, 1.0, |_| Some(RgbImage::from_pixel(10, 10, Rgb([255, 0, 0]))));
+        // the page is red right to its corners along the sides the grid overruns
+        let (w, h) = page.dimensions();
+        assert_eq!(page.get_pixel(0, h / 2), &Rgb([255, 0, 0]));
+        assert_eq!(page.get_pixel(w - 1, h / 2), &Rgb([255, 0, 0]));
+    }
+
+    #[test]
     fn fixed_columns_and_cells() {
         let g = a4(Some(3)).grid(12, 16.0 / 9.0);
         assert_eq!((g.cols, g.rows), (3, 4));
@@ -661,7 +731,7 @@ mod tests {
         let page = render(&a4(Some(3)), 3, 16.0 / 9.0, |i| (i < 2).then(|| RgbImage::from_pixel(160, 90, Rgb([255, 0, 0]))));
         let mid = |i| {
             let (x, y, w, h) = a4(Some(3)).grid(3, 16.0 / 9.0).cell(i);
-            *page.get_pixel(x + w / 2, y + h / 2)
+            *page.get_pixel(x as u32 + w / 2, y as u32 + h / 2)
         };
         assert_eq!((mid(0), mid(2)), (Rgb([255, 0, 0]), Rgb([200, 200, 200])));
         assert_eq!(page.get_pixel(5, 5), &Rgb([255, 255, 255]));

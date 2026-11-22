@@ -2174,7 +2174,7 @@ export component AppWindow inherits SheetWindow {
                                         label: @tr("Picture format");
                                         entries: root.picture-menu;
                                         text: root.picture-label;
-                                        // menu: 0 Full frame, 1–7 film formats, 8 Custom
+                                        // menu: 0 Full frame, 1–9 film formats, 10 Custom
                                         current: root.picture;
                                         selected(i) => { root.picture-chosen(i); }
                                     }
@@ -2230,7 +2230,7 @@ export component AppWindow inherits SheetWindow {
                                     text: @tr("Margin");
                                     NumberField {
                                         text <=> root.margin; unit: "px"; label: @tr("Margin"); invalid: root.invalid == "margin";
-                                        scrub: 1; step: 1;
+                                        scrub: 1; step: 1; minimum: -99999;
                                         edited => { root.sheet-changed(); }
                                     }
                                 }
