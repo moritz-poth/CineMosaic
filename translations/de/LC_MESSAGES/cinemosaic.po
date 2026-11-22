@@ -428,6 +428,15 @@ msgstr "Ganzen Bogen einpassen"
 msgid "Sheet"
 msgstr "Bogen"
 
+msgid "Grid"
+msgstr "Raster"
+
+msgid "Grid every"
+msgstr "Raster alle"
+
+msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."
+msgstr "Das Raster ist nur in der Vorschau zu sehen, es wird nicht exportiert. Es liegt über der Seite oder über der Fläche innerhalb der Schnittmarken; die kräftigeren Linien sind ihre Mitte. Die kleinen Striche am Rahmen der Headline werden grün, wenn die Mitte des Textes auf einer Rasterlinie liegt."
+
 msgid "Crop marks"
 msgstr "Schnittmarken"
 
@@ -445,21 +454,6 @@ msgstr "Abstand zum Rand"
 
 msgid "Colour"
 msgstr "Farbe"
-
-msgid "Black"
-msgstr "Schwarz"
-
-msgid "Dark grey"
-msgstr "Dunkelgrau"
-
-msgid "Grey"
-msgstr "Grau"
-
-msgid "White"
-msgstr "Weiß"
-
-msgid "Red"
-msgstr "Rot"
 
 msgid "Headline"
 msgstr "Headline"

@@ -153,6 +153,16 @@ struct Settings {
     betas: bool,
     /// not saved; shared with the threads that check and install
     update: Arc<Mutex<Update>>,
+    /// the five colour presets of the frame line [0] and the headline [1], "#rrggbb"
+    palettes: [Vec<String>; 2],
+}
+
+/// Colour presets before the user changes them: black, dark grey, grey, white, red.
+const PALETTE: [&str; 5] = ["#000000", "#3c4146", "#8a8f94", "#ffffff", "#b3261e"];
+
+/// [r, g, b] → "#rrggbb"
+fn hex_text(c: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
 }
 
 /// Update state as the windows show it (Shared.update-*).
@@ -195,14 +205,23 @@ fn load_settings() -> Settings {
     let dark = lines.next() != Some("light");
     let tab = lines.next().and_then(|l| l.parse().ok()).filter(|t| matches!(t, 0..=2)).unwrap_or(0);
     let betas = lines.next() == Some("betas");
-    Settings { language, dark, tab, betas, update: Arc::default() }
+    // five valid colours, else the defaults (settings from before 2026-11-22 have none)
+    let mut palette = || {
+        let p: Vec<String> = lines.next().unwrap_or("").split(',').filter_map(hex_color).map(hex_text).collect();
+        if p.len() == 5 { p } else { PALETTE.map(String::from).to_vec() }
+    };
+    let palettes = [palette(), palette()];
+    Settings { language, dark, tab, betas, update: Arc::default(), palettes }
 }
 
 fn save_settings(s: &Settings) {
     // comfort only; if saving fails the defaults apply next time
     if let Some(p) = settings_path() {
         let _ = std::fs::create_dir_all(p.parent().unwrap());
-        let _ = std::fs::write(p, format!("{}\n{}\n{}\n{}\n", s.language, if s.dark { "dark" } else { "light" }, s.tab, if s.betas { "betas" } else { "final" }));
+        let _ = std::fs::write(
+            p,
+            format!("{}\n{}\n{}\n{}\n{}\n{}\n", s.language, if s.dark { "dark" } else { "light" }, s.tab, if s.betas { "betas" } else { "final" }, s.palettes[0].join(","), s.palettes[1].join(",")),
+        );
     }
 }
 
@@ -619,6 +638,11 @@ fn mm_per_unit(app: &AppWindow) -> f64 {
     if app.get_px_units() { 25.4 / num(&app.get_dpi(), 10.0, 1200.0, "dpi").unwrap_or(300.0) } else { 1.0 }
 }
 
+/// mm per pixel of the sheet: frame line and headline place are always in px (an unusable dpi counts as 300).
+fn mm_per_px(app: &AppWindow) -> f64 {
+    25.4 / num(&app.get_dpi(), 10.0, 1200.0, "dpi").unwrap_or(300.0)
+}
+
 /// `mm` as a whole number in the unit of the length fields.
 fn in_unit(mm: f64, per: f64) -> SharedString {
     format!("{}", (mm / per).round() as i64).into()
@@ -689,15 +713,11 @@ fn switch_unit(app: &AppWindow, px: bool) {
     let old = mm_per_unit(app);
     app.set_px_units(px);
     let new = mm_per_unit(app);
-    let fields: [(Getter, Setter, f64); 8] = [
+    let fields: [(Getter, Setter, f64); 4] = [
         (AppWindow::get_custom_w, AppWindow::set_custom_w, 1.0),
         (AppWindow::get_custom_h, AppWindow::set_custom_h, 1.0),
         (AppWindow::get_margin, AppWindow::set_margin, 0.0),
         (AppWindow::get_gap, AppWindow::set_gap, 0.0),
-        (AppWindow::get_line_width, AppWindow::set_line_width, 1.0),
-        (AppWindow::get_line_inset, AppWindow::set_line_inset, 0.0),
-        (AppWindow::get_head_dx, AppWindow::set_head_dx, f64::MIN),
-        (AppWindow::get_head_dy, AppWindow::set_head_dy, f64::MIN),
     ];
     for (get, set, least) in fields {
         // an unusable value stays as typed (and red)
@@ -724,6 +744,42 @@ fn hex_color(s: &str) -> Option<[u8; 3]> {
     Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
 }
 
+/// The colour presets into a window.
+fn show_palettes(app: &AppWindow, s: &Settings) {
+    let swatches = |k: usize| {
+        let v: Vec<Swatch> = s.palettes[k]
+            .iter()
+            .map(|h| {
+                let [r, g, b] = hex_color(h).unwrap_or([0, 0, 0]);
+                Swatch { hex: h.into(), c: slint::Color::from_rgb_u8(r, g, b) }
+            })
+            .collect();
+        ModelRc::new(VecModel::from(v))
+    };
+    app.set_line_palette(swatches(0));
+    app.set_head_palette(swatches(1));
+}
+
+/// The chosen preset follows the colour (a preset or project brings its own): the preset with this colour, or none.
+fn match_slots(app: &AppWindow) {
+    use slint::Model;
+    let slot = |pal: ModelRc<Swatch>, value: SharedString| {
+        let c = hex_color(&value);
+        c.and_then(|c| pal.iter().position(|sw| hex_color(&sw.hex) == Some(c))).map_or(-1, |i| i as i32)
+    };
+    app.set_line_slot(slot(app.get_line_palette(), app.get_line_color()));
+    app.set_head_slot(slot(app.get_head_palette(), app.get_head_color()));
+}
+
+/// Preset `slot` of palette `k` gets colour `c`; saved, every window shows it.
+fn set_palette_entry(settings: &RefCell<Settings>, k: usize, slot: usize, c: [u8; 3]) {
+    let mut s = settings.borrow_mut();
+    let Some(e) = s.palettes[k].get_mut(slot) else { return };
+    *e = hex_text(c);
+    save_settings(&s);
+    all_windows().iter().for_each(|w| show_palettes(w, &s));
+}
+
 thread_local! {
     /// installed font families (menu order) and the faces already loaded
     static FONTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -733,7 +789,8 @@ thread_local! {
 /// Trim area, frame line and headline from the Design tab and the crop-marks switch; Err = the field that is not
 /// usable. `aspect` is the picture format the trim area takes.
 fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result<(), &'static str> {
-    let per = if app.get_px_units() { 25.4 / sheet.dpi } else { 1.0 };
+    // frame line and headline place in px of the sheet, whatever the unit of the Sheet tab
+    let per = 25.4 / sheet.dpi;
     sheet.trim = app.get_trim().then_some(aspect);
     let line_color = hex_color(&app.get_line_color());
     if let Some([r, g, b]) = line_color {
@@ -907,7 +964,7 @@ fn preset_json(app: &AppWindow) -> serde_json::Value {
         "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
         "picture": app.get_picture(), "aspect": app.get_aspect().as_str(), "trim": app.get_trim(),
-        "line-on": app.get_line_on(), "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
+        "line-on": app.get_line_on(), "lengths-px": true, "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
         "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
         "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
         "head-color": app.get_head_color().as_str(), "head-anchor": app.get_head_anchor(),
@@ -972,6 +1029,7 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("head-dx", &|s| app.set_head_dx(s));
     text("head-dy", &|s| app.set_head_dy(s));
     int("export-format", 3, &|n| app.set_export_format(n));
+    match_slots(app);
     // presets from before whole numbers: round
     for (get, set) in [
         (AppWindow::get_margin as Getter, AppWindow::set_margin as Setter),
@@ -987,6 +1045,20 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     }
     if let Ok(v) = num(&app.get_line_width(), f64::MIN, f64::MAX, "") {
         app.set_line_width(format!("{}", v.round().max(1.0) as i64).into());
+    }
+    // until 2026-11-22 frame line and headline place were in the unit of the Sheet tab; now always px
+    if v.get("lengths-px").is_none() && !app.get_px_units() {
+        let per = mm_per_px(app);
+        for (get, set, least) in [
+            (AppWindow::get_line_width as Getter, AppWindow::set_line_width as Setter, 1.0),
+            (AppWindow::get_line_inset, AppWindow::set_line_inset, 0.0),
+            (AppWindow::get_head_dx, AppWindow::set_head_dx, f64::MIN),
+            (AppWindow::get_head_dy, AppWindow::set_head_dy, f64::MIN),
+        ] {
+            if let Ok(x) = whole(&get(app), "") {
+                set(app, in_unit(x.max(least), per));
+            }
+        }
     }
     // the fields show the size: an A size from the list, a custom one turned to the orientation (older presets
     // kept it unturned)
@@ -1129,8 +1201,14 @@ fn refresh(app: &AppWindow) {
         }
         app.set_sheet_info(info.trim_start_matches(" · ").into());
         // where the headline is, for dragging it in the preview
-        app.set_page_w((sheet.width_mm / if app.get_px_units() { 25.4 / sheet.dpi } else { 1.0 }) as f32);
-        match sheet.plan().text {
+        app.set_page_px(w as f32);
+        let plan = sheet.plan();
+        let t = &plan.trim;
+        app.set_trim_x((t.x / w as f64) as f32);
+        app.set_trim_y((t.y / h as f64) as f32);
+        app.set_trim_w((t.w / w as f64) as f32);
+        app.set_trim_h((t.h / h as f64) as f32);
+        match plan.text {
             Some((r, _, _)) => {
                 app.set_head_bx((r.x / w as f64) as f32);
                 app.set_head_by((r.y / h as f64) as f32);
@@ -1170,11 +1248,29 @@ struct RenderJob {
 fn start_renderer(weak: slint::Weak<AppWindow>, latest: Arc<AtomicUsize>) -> std::sync::mpsc::Sender<RenderJob> {
     let (tx, rx) = std::sync::mpsc::channel::<RenderJob>();
     std::thread::spawn(move || {
+        // stills already scaled to their cell: a change of font, colour or pattern (cells unchanged) needs none
+        // scaled again; forgotten when the stills change
+        type Key = (Pick, u32, u32, Option<u64>);
+        let mut cache: (Option<Arc<HashMap<Pick, RgbImage>>>, HashMap<Key, RgbImage>) = (None, HashMap::new());
         while let Ok(mut job) = rx.recv() {
             while let Ok(newer) = rx.try_recv() {
                 job = newer;
             }
-            let page = layout::render(&job.sheet, job.picks.len(), job.aspect, |i| job.thumbs.get(&job.picks[i]).map(|t| cropped(t.clone(), job.picture)));
+            if !cache.0.as_ref().is_some_and(|t| Arc::ptr_eq(t, &job.thumbs)) || cache.1.len() > 8 * job.picks.len() + 64 {
+                cache = (Some(job.thumbs.clone()), HashMap::new());
+            }
+            let picture = job.picture.map(f64::to_bits);
+            let (done, made) = (&cache.1, std::sync::Mutex::new(Vec::new()));
+            let page = layout::render_tiles(&job.sheet, job.picks.len(), job.aspect, |i, cw, ch| {
+                let key = (job.picks[i].clone(), cw, ch, picture);
+                if let Some(t) = done.get(&key) {
+                    return Some(t.clone());
+                }
+                let t = layout::cover_cell(&cropped(job.thumbs.get(&job.picks[i])?.clone(), job.picture), cw, ch);
+                made.lock().unwrap().push((key, t.clone()));
+                Some(t)
+            });
+            cache.1.extend(made.into_inner().unwrap());
             if job.generation != latest.load(Ordering::Relaxed) {
                 continue; // a newer one is waiting
             }
@@ -2218,6 +2314,8 @@ fn new_window(ctx: &Rc<Ctx>) -> Result<AppWindow, slint::PlatformError> {
     FRONT.with(|f| f.set(app.get_win_id()));
     wire_shared(&app, ctx);
     wire_window(&app, ctx);
+    show_palettes(&app, &ctx.settings.borrow());
+    match_slots(&app);
     show_fonts(&app);
     preset_menu(&app);
     picture_menu(&app);
@@ -2630,12 +2728,62 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(size_edited)
     });
+    // a colour preset clicked: its colour
+    app.on_color_swatch({
+        let weak = app.as_weak();
+        move |k, i| {
+            let Some(app) = weak.upgrade() else { return };
+            let pal = if k == 0 { app.get_line_palette() } else { app.get_head_palette() };
+            let Some(sw) = slint::Model::row_data(&pal, i as usize) else { return };
+            if k == 0 {
+                app.set_line_slot(i);
+                app.set_line_color(sw.hex);
+            } else {
+                app.set_head_slot(i);
+                app.set_head_color(sw.hex);
+            }
+            refresh(&app);
+        }
+    });
+    // a click into the hex field: the colour panel; what is picked there becomes the chosen preset (none chosen:
+    // only the colour)
+    app.on_color_panel({
+        let (weak, ctx) = (app.as_weak(), ctx.clone());
+        move |k| {
+            let Some(app) = weak.upgrade() else { return };
+            let value = if k == 0 { app.get_line_color() } else { app.get_head_color() };
+            let (weak, ctx) = (weak.clone(), ctx.clone());
+            color_panel::open(
+                hex_color(&value).unwrap_or([0, 0, 0]),
+                Rc::new(move |c| {
+                    let Some(app) = weak.upgrade() else { return };
+                    let slot = if k == 0 { app.get_line_slot() } else { app.get_head_slot() };
+                    if let Ok(slot) = usize::try_from(slot) {
+                        set_palette_entry(&ctx.settings, k as usize, slot, c);
+                    }
+                    if k == 0 { app.set_line_color(hex_text(c).into()) } else { app.set_head_color(hex_text(c).into()) }
+                    refresh(&app);
+                }),
+            );
+        }
+    });
+    // a hex value typed: the chosen preset takes it
+    app.on_color_typed({
+        let (weak, ctx) = (app.as_weak(), ctx.clone());
+        move |k| {
+            let Some(app) = weak.upgrade() else { return };
+            let (value, slot) = if k == 0 { (app.get_line_color(), app.get_line_slot()) } else { (app.get_head_color(), app.get_head_slot()) };
+            if let (Some(c), Ok(slot)) = (hex_color(&value), usize::try_from(slot)) {
+                set_palette_entry(&ctx.settings, k as usize, slot, c);
+            }
+        }
+    });
     app.on_anchor_chosen({
         let weak = app.as_weak();
         move |i| {
             let Some(app) = weak.upgrade() else { return };
             app.set_head_anchor(i);
-            let per = mm_per_unit(&app);
+            let per = mm_per_px(&app);
             app.set_head_dx(in_unit([10.0, 0.0, -10.0][i as usize % 3], per));
             app.set_head_dy(in_unit([8.0, 0.0, -8.0][(i as usize / 3).min(2)], per));
             refresh(&app);
@@ -2845,6 +2993,76 @@ fn load_texts_again(app: &AppWindow) {
         }
     });
     refresh(app);
+}
+
+/// The macOS colour panel: opened with a colour, it reports every colour picked (polled; it has no Slint target)
+/// until it is closed or opened for another preset.
+mod color_panel {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    type OnPick = Rc<dyn Fn([u8; 3])>;
+
+    thread_local! {
+        static TARGET: RefCell<Option<(OnPick, [u8; 3])>> = const { RefCell::new(None) };
+        static TIMER: slint::Timer = slint::Timer::default();
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn open(c: [u8; 3], on_pick: OnPick) {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        unsafe {
+            let panel: *mut AnyObject = msg_send![class!(NSColorPanel), sharedColorPanel];
+            let _: () = msg_send![panel, setShowsAlpha: false];
+            let [r, g, b] = c.map(|v| v as f64 / 255.0);
+            let color: *mut AnyObject = msg_send![class!(NSColor), colorWithSRGBRed: r, green: g, blue: b, alpha: 1.0f64];
+            let _: () = msg_send![panel, setColor: color];
+            let _: () = msg_send![panel, orderFront: std::ptr::null_mut::<AnyObject>()];
+        }
+        TARGET.with(|t| *t.borrow_mut() = Some((on_pick, c)));
+        TIMER.with(|t| t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(80), poll));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn open(_: [u8; 3], _: OnPick) {}
+
+    #[cfg(target_os = "macos")]
+    fn poll() {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        let picked = unsafe {
+            let panel: *mut AnyObject = msg_send![class!(NSColorPanel), sharedColorPanel];
+            let visible: bool = msg_send![panel, isVisible];
+            if !visible {
+                TIMER.with(|t| t.stop());
+                TARGET.with(|t| *t.borrow_mut() = None);
+                return;
+            }
+            let color: *mut AnyObject = msg_send![panel, color];
+            let space: *mut AnyObject = msg_send![class!(NSColorSpace), sRGBColorSpace];
+            let srgb: *mut AnyObject = msg_send![color, colorUsingColorSpace: space];
+            if srgb.is_null() {
+                return;
+            }
+            let (r, g, b): (f64, f64, f64) = (msg_send![srgb, redComponent], msg_send![srgb, greenComponent], msg_send![srgb, blueComponent]);
+            [r, g, b].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        };
+        let call = TARGET.with(|t| {
+            let mut t = t.borrow_mut();
+            let (f, last) = t.as_mut()?;
+            (*last != picked).then(|| {
+                *last = picked;
+                f.clone()
+            })
+        });
+        if let Some(f) = call {
+            f(picked);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn poll() {}
 }
 
 #[cfg(target_os = "macos")]

@@ -428,6 +428,15 @@ msgstr "Ajuster toute la planche"
 msgid "Sheet"
 msgstr "Planche"
 
+msgid "Grid"
+msgstr "Grille"
+
+msgid "Grid every"
+msgstr "Grille tous les"
+
+msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."
+msgstr "La grille n'apparaît que dans l'aperçu, elle n'est pas exportée. Elle couvre la page, ou la zone à l'intérieur des traits de coupe ; les lignes plus marquées sont son milieu. Les petits traits sur le cadre du titre passent au vert quand le milieu du texte est sur une ligne de la grille."
+
 msgid "Crop marks"
 msgstr "Traits de coupe"
 
@@ -445,21 +454,6 @@ msgstr "Distance au bord"
 
 msgid "Colour"
 msgstr "Couleur"
-
-msgid "Black"
-msgstr "Noir"
-
-msgid "Dark grey"
-msgstr "Gris foncé"
-
-msgid "Grey"
-msgstr "Gris"
-
-msgid "White"
-msgstr "Blanc"
-
-msgid "Red"
-msgstr "Rouge"
 
 msgid "Headline"
 msgstr "Titre"

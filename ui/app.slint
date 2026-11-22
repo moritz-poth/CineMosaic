@@ -10,6 +10,12 @@ export struct MenuChoice {
     checked: bool,
 }
 
+// a colour preset of the frame line or headline: as typed and as Rust read it
+export struct Swatch {
+    hex: string,
+    c: color,
+}
+
 export struct HelpBlock {
     heading: string,
     body: styled-text,
@@ -1428,8 +1434,11 @@ component FontList inherits Rectangle {
     in-out property <int> current;
     callback chosen();
     callback jump(string) -> int;
+    // a row clicked, or Return / Escape: the dropdown closes
+    callback done();
+    in property <int> rows: 7;
     property <length> row-h: 28px;
-    height: 7 * self.row-h + 2px;
+    height: self.rows * self.row-h + 2px;
     border-radius: 6px;
     border-width: 1px;
     // no blue focus frame and no blue row (user 2026-11-21): the chosen font is a quiet grey row
@@ -1444,10 +1453,14 @@ component FontList inherits Rectangle {
         }
     }
     changed current => { root.reveal(); }
-    // the list is made each time the tab opens: show the chosen font right away
-    init => { root.reveal(); }
+    // the list is made each time it opens: show the chosen font right away, keys go to it
+    init => { root.reveal(); fs.focus(); }
     fs := FocusScope {
         key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Escape {
+                root.done();
+                return accept;
+            }
             if e.text == Key.UpArrow {
                 if root.current > 0 { root.current -= 1; root.chosen(); }
                 return accept;
@@ -1481,8 +1494,95 @@ component FontList inherits Rectangle {
                     overflow: elide;
                 }
                 t := TouchArea {
-                    clicked => { root.current = i; fs.focus(); root.chosen(); }
+                    clicked => { root.current = i; root.chosen(); root.done(); }
                 }
+            }
+        }
+    }
+}
+
+// The font as a dropdown, the name in its own look. Closed: ↑ / ↓ step through the fonts, a letter jumps to the next
+// font starting with it; a click opens the list, where the same keys work and the sheet follows at once.
+component FontDropdown inherits Rectangle {
+    in property <[string]> fonts;
+    in-out property <int> current;
+    in property <string> label;
+    callback chosen();
+    callback jump(string) -> int;
+    height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.line;
+    background: touch.pressed ? Theme.text.with-alpha(0.12) : touch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.fonts.length > 0 ? root.fonts[root.current] : "";
+    accessible-action-default => { popup.show(); }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 6px;
+        Text {
+            text: root.fonts.length > 0 ? root.fonts[root.current] : "";
+            font-family: self.text;
+            font-size: 15px;
+            color: Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
+        }
+    }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.UpArrow {
+                if root.current > 0 { root.current -= 1; root.chosen(); }
+                return accept;
+            }
+            if e.text == Key.DownArrow {
+                if root.current < root.fonts.length - 1 { root.current += 1; root.chosen(); }
+                return accept;
+            }
+            if e.text == Key.Return || e.text == " " {
+                popup.show();
+                return accept;
+            }
+            if e.text != "" && e.text != Key.Tab && e.text != Key.Backtab && !e.modifiers.control && !e.modifiers.meta {
+                let i = root.jump(e.text);
+                if i >= 0 { root.current = i; root.chosen(); }
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { fs.focus(); popup.show(); }
+        }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        height: 10 * 28px + 2px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: Theme.sidebar;
+            border-radius: 6px;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000066;
+            FontList {
+                width: parent.width;
+                rows: 10;
+                fonts: root.fonts;
+                current <=> root.current;
+                chosen => { root.chosen(); }
+                jump(t) => { return root.jump(t); }
+                done => { popup.close(); fs.focus(); }
             }
         }
     }
@@ -1557,13 +1657,20 @@ component StyleToggle inherits Rectangle {
     }
 }
 
-// Colour: a few swatches and a hex field; the square at the right shows the colour Rust read
+// Colour: five presets and a hex field. A click on a preset takes its colour; a click into the hex field opens the
+// colour panel, whose colour then becomes the chosen preset; typing a hex value changes it too (Rust). The square at the right shows
+// the colour Rust read.
 component ColorRow inherits HorizontalLayout {
     in property <string> text;
     in-out property <string> value;
     in property <color> shown;
     in property <bool> invalid;
+    in property <[Swatch]> palette;
+    // the chosen preset (-1: the colour is none of them)
+    in property <int> slot;
     callback edited();
+    callback swatch(int);
+    callback panel();
     spacing: 6px;
     height: 30px;
     Text {
@@ -1573,28 +1680,22 @@ component ColorRow inherits HorizontalLayout {
         vertical-alignment: center;
         color: Theme.text;
     }
-    for sw in [
-        { c: #000000, hex: "#000000", name: @tr("Black") },
-        { c: #3c4146, hex: "#3c4146", name: @tr("Dark grey") },
-        { c: #8a8f94, hex: "#8a8f94", name: @tr("Grey") },
-        { c: #ffffff, hex: "#ffffff", name: @tr("White") },
-        { c: #b3261e, hex: "#b3261e", name: @tr("Red") },
-    ]: VerticalLayout {
+    for sw[i] in root.palette: VerticalLayout {
         alignment: center;
         Rectangle {
             width: 18px;
             height: 18px;
             border-radius: 9px;
             background: sw.c;
-            border-width: root.value == sw.hex ? 2px : 1px;
-            border-color: root.value == sw.hex ? Theme.accent : Theme.line;
+            border-width: i == root.slot ? 2px : 1px;
+            border-color: i == root.slot ? Theme.accent : Theme.line;
             accessible-role: button;
-            accessible-label: sw.name;
-            accessible-checked: root.value == sw.hex;
-            accessible-action-default => { root.value = sw.hex; root.edited(); }
+            accessible-label: sw.hex;
+            accessible-checked: i == root.slot;
+            accessible-action-default => { root.swatch(i); }
             TouchArea {
                 mouse-cursor: pointer;
-                clicked => { root.value = sw.hex; root.edited(); }
+                clicked => { root.swatch(i); }
             }
         }
     }
@@ -1603,6 +1704,8 @@ component ColorRow inherits HorizontalLayout {
         height: 26px;
         border-color: root.invalid ? Theme.error : hex.has-focus ? Theme.accent : Theme.line;
         hex := TextInput {
+            // a click into the field also opens the colour panel (Rust)
+            changed has-focus => { if self.has-focus { root.panel(); } }
             x: 6px;
             width: parent.width - 30px;
             height: parent.height;
@@ -1706,7 +1809,7 @@ export component AppWindow inherits SheetWindow {
     // sheet (index into the paper list: 0 custom, 1–7 DIN A0..A6, 8–14 social media sizes in px); the list fills width × height, editing them picks the
     // matching size or Custom (Rust)
     in-out property <int> paper: 5;
-    // lengths (paper, margin, gap, frame line, headline move) in px instead of mm; Rust converts the fields on a switch
+    // paper, margin and gap in px instead of mm (frame line and headline move are always px of the sheet); Rust converts the fields on a switch
     in-out property <bool> px-units;
     out property <string> unit: root.px-units ? "px" : "mm";
     callback paper-chosen(int);
@@ -1728,26 +1831,43 @@ export component AppWindow inherits SheetWindow {
     in-out property <bool> landscape: true;
     // side column tab: 0 source, 1 sheet, 2 design
     in-out property <int> side-tab;
+    changed side-tab => { side-flick.content-y = 0; }
     // crop marks: trim area in the picture format
     in-out property <bool> trim;
     // frame line and headline; colours as "#rrggbb", the swatch shows what Rust read
     in-out property <bool> line-on;
-    in-out property <string> line-width: "1";
-    in-out property <string> line-inset: "6";
+    // a grid in percent of the page over the preview on the Headline tab (only shown, never exported)
+    in-out property <bool> head-grid;
+    in-out property <string> head-grid-step: "10";
+    property <int> grid-step: root.head-grid-step.is-float() ? clamp(Math.round(root.head-grid-step.to-float()), 1, 50) : 10;
+    // the middle of the headline in % of the trim area, and whether it lies on a grid line (within half a pixel of
+    // the sheet): its ticks turn green
+    property <float> head-cx: (root.head-bx + root.head-bw / 2 - root.trim-x) / root.trim-w * 100;
+    property <float> head-cy: (root.head-by + root.head-bh / 2 - root.trim-y) / root.trim-h * 100;
+    property <bool> on-grid-x: root.head-grid && Math.abs(root.head-cx - Math.round(root.head-cx / root.grid-step) * root.grid-step) / 100 * root.trim-w * root.page-px <= 0.6;
+    property <bool> on-grid-y: root.head-grid && Math.abs(root.head-cy - Math.round(root.head-cy / root.grid-step) * root.grid-step) / 100 * root.trim-h * root.page-px / root.page-aspect <= 0.6;
+    // px of the sheet; the defaults are the old 1 mm and 6 mm at 300 dpi
+    in-out property <string> line-width: "12";
+    in-out property <string> line-inset: "71";
     in-out property <string> line-color: "#000000";
     in property <color> line-swatch: black;
     in-out property <int> line-pattern;
     in-out property <string> headline;
-    // headline anchor 0–8 (rows top / middle / bottom × left / centre / right) and its move in mm or px
+    // headline anchor 0–8 (rows top / middle / bottom × left / centre / right) and its move in px of the sheet
     in property <int> head-anchor: 1;
     in-out property <string> head-dx: "0";
-    in-out property <string> head-dy: "8";
-    // where Rust drew the headline, as fractions of the page, and the page width in mm or px (dragging)
+    in-out property <string> head-dy: "94";
+    // where Rust drew the headline and the trim area (the whole page without crop marks), as fractions of the page,
+    // and the page width in px of the sheet (dragging, grid hits)
     in property <float> head-bx;
     in property <float> head-by;
     in property <float> head-bw;
     in property <float> head-bh;
-    in property <float> page-w: 297;
+    in property <float> page-px: 3508;
+    in property <float> trim-x: 0;
+    in property <float> trim-y: 0;
+    in property <float> trim-w: 1;
+    in property <float> trim-h: 1;
     callback anchor-chosen(int);
     callback jump-font(string) -> int;
     in property <[string]> fonts;
@@ -1757,6 +1877,14 @@ export component AppWindow inherits SheetWindow {
     in-out property <bool> head-italic;
     in-out property <string> head-color: "#000000";
     in property <color> head-swatch: black;
+    // colour presets (Rust: settings, the same in every window) and the chosen one; 0 frame line, 1 headline
+    in property <[Swatch]> line-palette;
+    in property <[Swatch]> head-palette;
+    in-out property <int> line-slot;
+    in-out property <int> head-slot;
+    callback color-swatch(int, int);
+    callback color-panel(int);
+    callback color-typed(int);
 
     in-out property <string> custom-w: "297";
     in-out property <string> custom-h: "210";
@@ -1827,318 +1955,367 @@ export component AppWindow inherits SheetWindow {
                 }
                 Rectangle { height: 6px; }
 
-                // alignment start: free space goes below, never between the rows
-                if root.side-tab == 0: VerticalLayout {
-                    spacing: 6px;
-                    alignment: start;
+                // the tab scrolls when the window is too low for it: nothing disappears (user 2026-11-22); no drag
+                // scrolling, so the fields can still be dragged – wheel and trackpad scroll
+                Rectangle {
                     vertical-stretch: 1;
-                    Row {
-                        text: @tr("Source");
-                        Dropdown {
-                            label: @tr("Source");
-                            items: [@tr("Master file + cut list"), @tr("Media Composer bin")];
-                            current: root.mode;
-                            selected(i) => { root.mode = i; root.mode-chosen(i); }
-                        }
-                    }
-                    if root.mode == 0: VerticalLayout {
-                        spacing: 6px;
-                        Row {
-                            text: @tr("Master files");
-                            CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-master(); } }
-                        }
-                        for name[i] in root.master-names: FileRow { text: name; removed => { root.remove-master(i); } }
-                        Row {
-                            text: @tr("Cut lists");
-                            CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-list(); } }
-                        }
-                        for name[i] in root.list-names: FileRow { text: name; removed => { root.remove-list(i); } }
-                        Para { text: @tr("A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."); }
-                        // always there; usable while a master has neither a cut list nor detected cuts
-                        VerticalLayout {
-                            spacing: 6px;
-                            HorizontalLayout {
+                    side-flick := Flickable {
+                        interactive: false;
+                        content-height: tabs.preferred-height;
+                        tabs := VerticalLayout {
+                            x: 0;
+                            width: side-flick.width;
+                            alignment: start;
+                            // alignment start: free space goes below, never between the rows
+                            if root.side-tab == 0: VerticalLayout {
+                                spacing: 6px;
                                 alignment: start;
-                                CheckButton { text: @tr("Detect cuts"); small: true; enabled: root.state != 1 && root.can-detect; clicked => { root.detect-cuts(); } }
-                            }
-                            Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
-                            Row {
-                                text: @tr("Film starts at");
-                                TcField { text <=> root.detect-from; label: @tr("Film starts at"); key(t, k) => { root.tc-key(t, k) } }
-                            }
-                            Row {
-                                text: @tr("Film ends at");
-                                TcField { text <=> root.detect-to; label: @tr("Film ends at"); key(t, k) => { root.tc-key(t, k) } }
-                            }
-                            Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."); }
-                        }
-                    }
-                    if root.mode == 1: VerticalLayout {
-                        spacing: 6px;
-                        Row {
-                            text: @tr("Bin");
-                            CheckButton { text: @tr("Choose…"); small: true; enabled: root.state != 1; clicked => { root.pick-bin(); } }
-                        }
-                        if root.bin-name != "": Para { text: root.bin-name; color: Theme.muted; }
-                        if root.sequences.length > 0: Row {
-                            text: @tr("Sequence");
-                            // All sequences, or one or several with a tick
-                            CheckDropdown {
-                                label: @tr("Sequence");
-                                entries: root.sequences;
-                                text: root.sequence-label;
-                                selected(i) => { root.toggle-sequence(i); }
-                            }
-                        }
-                        Text { text: @tr("Volumes with Avid MediaFiles"); font-size: 12px; color: Theme.text; height: 24px; vertical-alignment: center; }
-                        if root.volumes.length == 0: Para { text: @tr("No volume with an Avid MediaFiles folder is connected."); }
-                        // shortcut: a plain scroll area without a thumb; enough for the usual handful of volumes
-                        Flickable {
-                            height: min(root.volumes.length * 28px, 112px);
-                            content-height: root.volumes.length * 28px;
-                            VerticalLayout {
-                                for v[i] in root.volumes: HorizontalLayout {
-                                    height: 28px;
-                                    spacing: 10px;
-                                    Text { text: v.name; font-size: 12px; color: Theme.muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                vertical-stretch: 1;
+                                Row {
+                                    text: @tr("Source");
+                                    Dropdown {
+                                        label: @tr("Source");
+                                        items: [@tr("Master file + cut list"), @tr("Media Composer bin")];
+                                        current: root.mode;
+                                        selected(i) => { root.mode = i; root.mode-chosen(i); }
+                                    }
+                                }
+                                if root.mode == 0: VerticalLayout {
+                                    spacing: 6px;
+                                    Row {
+                                        text: @tr("Master files");
+                                        CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-master(); } }
+                                    }
+                                    for name[i] in root.master-names: FileRow { text: name; removed => { root.remove-master(i); } }
+                                    Row {
+                                        text: @tr("Cut lists");
+                                        CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-list(); } }
+                                    }
+                                    for name[i] in root.list-names: FileRow { text: name; removed => { root.remove-list(i); } }
+                                    Para { text: @tr("A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."); }
+                                    // always there; usable while a master has neither a cut list nor detected cuts
                                     VerticalLayout {
-                                        alignment: center;
-                                        Switch { on: v.on; label: v.name; toggled => { root.toggle-volume(i); } }
+                                        spacing: 6px;
+                                        HorizontalLayout {
+                                            padding-top: 8px;
+                                            padding-bottom: 2px;
+                                            alignment: start;
+                                            CheckButton { text: @tr("Detect cuts"); small: true; enabled: root.state != 1 && root.can-detect; clicked => { root.detect-cuts(); } }
+                                        }
+                                        Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
+                                        Row {
+                                            text: @tr("Film starts at");
+                                            TcField { text <=> root.detect-from; label: @tr("Film starts at"); key(t, k) => { root.tc-key(t, k) } }
+                                        }
+                                        Row {
+                                            text: @tr("Film ends at");
+                                            TcField { text <=> root.detect-to; label: @tr("Film ends at"); key(t, k) => { root.tc-key(t, k) } }
+                                        }
+                                        Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."); }
+                                    }
+                                }
+                                if root.mode == 1: VerticalLayout {
+                                    spacing: 6px;
+                                    Row {
+                                        text: @tr("Bin");
+                                        CheckButton { text: @tr("Choose…"); small: true; enabled: root.state != 1; clicked => { root.pick-bin(); } }
+                                    }
+                                    if root.bin-name != "": Para { text: root.bin-name; color: Theme.muted; }
+                                    if root.sequences.length > 0: Row {
+                                        text: @tr("Sequence");
+                                        // All sequences, or one or several with a tick
+                                        CheckDropdown {
+                                            label: @tr("Sequence");
+                                            entries: root.sequences;
+                                            text: root.sequence-label;
+                                            selected(i) => { root.toggle-sequence(i); }
+                                        }
+                                    }
+                                    Text { text: @tr("Volumes with Avid MediaFiles"); font-size: 12px; color: Theme.text; height: 24px; vertical-alignment: center; }
+                                    if root.volumes.length == 0: Para { text: @tr("No volume with an Avid MediaFiles folder is connected."); }
+                                    // shortcut: a plain scroll area without a thumb; enough for the usual handful of volumes
+                                    Flickable {
+                                        height: min(root.volumes.length * 28px, 112px);
+                                        content-height: root.volumes.length * 28px;
+                                        VerticalLayout {
+                                            for v[i] in root.volumes: HorizontalLayout {
+                                                height: 28px;
+                                                spacing: 10px;
+                                                Text { text: v.name; font-size: 12px; color: Theme.muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Switch { on: v.on; label: v.name; toggled => { root.toggle-volume(i); } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if root.source-error != "": Para { text: root.source-error; color: Theme.error; }
+                                if root.source-info != "": Para { text: root.source-info; }
+                                if root.state != 1: HorizontalLayout {
+                                    padding-top: 12px;
+                                    alignment: start;
+                                    CheckButton {
+                                        text: root.state == 2 && root.missing > 0 ? @tr("Grab {} missing stills", root.missing)
+                                            : root.state == 2 ? @tr("Grab stills again") : @tr("Grab stills");
+                                        primary: root.state != 2 || root.missing > 0;
+                                        enabled: root.can-grab;
+                                        clicked => { root.grab(); }
+                                    }
+                                }
+                                if root.state == 1: VerticalLayout {
+                                    padding-top: 4px;
+                                    spacing: 6px;
+                                    ProgressBar { value: root.progress; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Text { text: root.work-text; font-size: 11px; color: Theme.muted; overflow: elide; horizontal-stretch: 1; }
+                                        Text { text: root.paused ? @tr("Paused") : root.time-left; font-size: 11px; color: Theme.muted; horizontal-stretch: 0; }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: end;
+                                        CheckButton { text: root.paused ? @tr("Resume") : @tr("Pause"); small: true; clicked => { root.pause(!root.paused); } }
+                                        CheckButton { text: @tr("Cancel"); small: true; clicked => { root.cancel(); } }
                                     }
                                 }
                             }
-                        }
-                    }
-                    if root.source-error != "": Para { text: root.source-error; color: Theme.error; }
-                    if root.source-info != "": Para { text: root.source-info; }
-                    if root.state != 1: HorizontalLayout {
-                        padding-top: 4px;
-                        alignment: start;
-                        CheckButton {
-                            text: root.state == 2 && root.missing > 0 ? @tr("Grab {} missing stills", root.missing)
-                                : root.state == 2 ? @tr("Grab stills again") : @tr("Grab stills");
-                            primary: root.state != 2 || root.missing > 0;
-                            enabled: root.can-grab;
-                            clicked => { root.grab(); }
-                        }
-                    }
-                    if root.state == 1: VerticalLayout {
-                        padding-top: 4px;
-                        spacing: 6px;
-                        ProgressBar { value: root.progress; }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: root.work-text; font-size: 11px; color: Theme.muted; overflow: elide; horizontal-stretch: 1; }
-                            Text { text: root.paused ? @tr("Paused") : root.time-left; font-size: 11px; color: Theme.muted; horizontal-stretch: 0; }
-                        }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: end;
-                            CheckButton { text: root.paused ? @tr("Resume") : @tr("Pause"); small: true; clicked => { root.pause(!root.paused); } }
-                            CheckButton { text: @tr("Cancel"); small: true; clicked => { root.cancel(); } }
-                        }
-                    }
-                }
-                // alignment start: free space goes below, never between the rows
-                if root.side-tab == 1: VerticalLayout {
-                    spacing: 6px;
-                    alignment: start;
-                    vertical-stretch: 1;
-                    Row {
-                        text: @tr("Picture format");
-                        SectionDropdown {
-                            label: @tr("Picture format");
-                            entries: root.picture-menu;
-                            text: root.picture-label;
-                            // menu: 0 Full frame, 1–7 film formats, 8 Custom
-                            current: root.picture;
-                            selected(i) => { root.picture-chosen(i); }
-                        }
-                    }
-                    Row {
-                        text: @tr("Width : height");
-                        // one field like the old Custom: "2.39:1", "9:16", "21:9" or just "2.39" (typing only)
-                        NumberField { text <=> root.aspect; scrub: 0; unit: ""; label: @tr("Width : height"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
-                    }
-                    if root.picture != 0: Para { text: @tr("Black bars outside this format are cut off (top and bottom or left and right)."); }
-                    Row {
-                        text: @tr("Paper");
-                        SectionDropdown {
-                            label: @tr("Paper");
-                            entries: root.paper-menu;
-                            text: root.paper-label;
-                            // menu: 0 Custom, 1 heading, 2–8 DIN A0–A6, 9 heading, 10–16 social media sizes
-                            current: root.paper == 0 ? 0 : root.paper <= 7 ? root.paper + 1 : root.paper + 2;
-                            selected(i) => { root.paper-chosen(i == 0 ? 0 : i <= 8 ? i - 1 : i - 2); }
-                        }
-                    }
-                    Row {
-                        text: @tr("Width × height");
-                        NumberField { text <=> root.custom-w; scrub: root.px-units ? 4 : 1; step: 1; minimum: 10; unit: root.unit; label: @tr("Width"); invalid: root.invalid == "width"; edited => { root.size-edited(); } }
-                        NumberField { text <=> root.custom-h; scrub: root.px-units ? 4 : 1; step: 1; minimum: 10; unit: root.unit; label: @tr("Height"); invalid: root.invalid == "height"; edited => { root.size-edited(); } }
-                    }
-                    Row {
-                        text: @tr("Unit");
-                        Dropdown {
-                            label: @tr("Unit");
-                            items: ["mm", @tr("Pixels")];
-                            current: root.px-units ? 1 : 0;
-                            selected(i) => { root.unit-chosen(i == 1); }
-                        }
-                    }
-                    Row {
-                        text: @tr("Orientation");
-                        Dropdown {
-                            label: @tr("Orientation");
-                            items: [@tr("Portrait"), @tr("Landscape")];
-                            current: root.landscape ? 1 : 0;
-                            selected(i) => { root.orientation-chosen(i == 1); }
-                        }
-                    }
-                    Row {
-                        text: @tr("Resolution");
-                        NumberField { text <=> root.dpi; scrub: 1; step: 1; minimum: 10; unit: "dpi"; label: @tr("Resolution"); invalid: root.invalid == "dpi"; edited => { root.size-edited(); } }
-                    }
-                    Row {
-                        text: @tr("Margin");
-                        NumberField {
-                            text <=> root.margin; unit: root.unit; label: @tr("Margin"); invalid: root.invalid == "margin";
-                            scrub: root.px-units ? 1 : 0.5; step: 1;
-                            edited => { root.sheet-changed(); }
-                        }
-                    }
-                    Row {
-                        text: @tr("Gap between stills");
-                        NumberField {
-                            text <=> root.gap; unit: root.unit; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
-                            scrub: root.px-units ? 0.5 : 0.1; step: 1;
-                            edited => { root.sheet-changed(); }
-                        }
-                    }
-                    Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
-                    Row {
-                        text: @tr("Columns automatic");
-                        VerticalLayout {
-                            alignment: center;
-                            Switch { on: root.auto-cols; label: @tr("Columns automatic"); toggled => { root.auto-cols = !root.auto-cols; root.sheet-changed(); } }
-                        }
-                    }
-                    if !root.auto-cols: Row {
-                        text: @tr("Columns");
-                        NumberField { text <=> root.cols; scrub: 0.1; step: 1; minimum: 1; unit: ""; label: @tr("Columns"); invalid: root.invalid == "columns"; edited => { root.sheet-changed(); } }
-                    }
-                    Row {
-                        text: @tr("Crop marks");
-                        VerticalLayout {
-                            alignment: center;
-                            Switch { on: root.trim; label: @tr("Crop marks"); toggled => { root.trim = !root.trim; root.sheet-changed(); } }
-                        }
-                    }
-                    if root.trim: Para { text: @tr("The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out."); }
-                    Para { text: root.sheet-info; }
-                }
-                // alignment start: free space goes below, never between the rows
-                if root.side-tab == 2: VerticalLayout {
-                    spacing: 6px;
-                    alignment: start;
-                    vertical-stretch: 1;
-                    Row {
-                        text: @tr("Frame line");
-                        VerticalLayout {
-                            alignment: center;
-                            Switch { on: root.line-on; label: @tr("Frame line"); toggled => { root.line-on = !root.line-on; root.sheet-changed(); } }
-                        }
-                    }
-                    if root.line-on: VerticalLayout {
-                        spacing: 6px;
-                        Text { text: @tr("Pattern"); font-size: 12px; color: Theme.text; height: 22px; vertical-alignment: center; }
-                        PatternPicker { current <=> root.line-pattern; chosen => { root.sheet-changed(); } }
-                        Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
-                        Row {
-                            text: @tr("Thickness");
-                            NumberField { text <=> root.line-width; scrub: root.px-units ? 0.2 : 0.05; step: 1; minimum: 1; unit: root.unit; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
-                        }
-                        Row {
-                            text: @tr("Distance from the edge");
-                            NumberField {
-                                text <=> root.line-inset; scrub: root.px-units ? 1 : 0.5; step: 1; unit: root.unit; label: @tr("Distance from the edge"); invalid: root.invalid == "line-inset";
-                                edited => { root.sheet-changed(); }
-                            }
-                        }
-                        ColorRow { text: @tr("Colour"); value <=> root.line-color; shown: root.line-swatch; invalid: root.invalid == "line-color"; edited => { root.sheet-changed(); } }
-                    }
-                }
-                if root.side-tab == 3: VerticalLayout {
-                    spacing: 6px;
-                    alignment: start;
-                    vertical-stretch: 1;
-                    FieldFrame {
-                        height: 26px;
-                        border-color: head-input.has-focus ? Theme.accent : Theme.line;
-                        if root.headline == "": Text {
-                            x: 8px;
-                            height: parent.height;
-                            text: @tr("Headline (empty = none)");
-                            font-size: 12px;
-                            color: Theme.faint;
-                            vertical-alignment: center;
-                        }
-                        head-input := TextInput {
-                            x: 8px;
-                            width: parent.width - 16px;
-                            height: parent.height;
-                            text <=> root.headline;
-                            font-size: 12px;
-                            color: Theme.text;
-                            vertical-alignment: center;
-                            single-line: true;
-                            accessible-label: @tr("Headline");
-                            edited => { root.sheet-changed(); }
-                        }
-                    }
-                    if root.headline != "": VerticalLayout {
-                        spacing: 6px;
-                        Text { text: @tr("Font"); font-size: 12px; color: Theme.text; height: 22px; vertical-alignment: center; }
-                        FontList {
-                            fonts: root.fonts;
-                            current <=> root.font;
-                            chosen => { root.sheet-changed(); }
-                            jump(t) => { return root.jump-font(t); }
-                        }
-                        Row {
-                            text: @tr("Size");
-                            StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
-                            StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
-                            NumberField { text <=> root.head-size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
-                        }
-                        ColorRow { text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color"; edited => { root.sheet-changed(); } }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            VerticalLayout {
-                                spacing: 4px;
-                                Text { text: @tr("Anchor"); font-size: 12px; color: Theme.text; }
-                                AnchorPicker { current: root.head-anchor; chosen(i) => { root.anchor-chosen(i); } }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            VerticalLayout {
+                            // alignment start: free space goes below, never between the rows
+                            if root.side-tab == 1: VerticalLayout {
                                 spacing: 6px;
-                                alignment: end;
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                    NumberField { text <=> root.head-dx; scrub: root.px-units ? 2 : 0.5; step: 1; minimum: -99999; unit: root.unit; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                alignment: start;
+                                vertical-stretch: 1;
+                                Row {
+                                    text: @tr("Picture format");
+                                    SectionDropdown {
+                                        label: @tr("Picture format");
+                                        entries: root.picture-menu;
+                                        text: root.picture-label;
+                                        // menu: 0 Full frame, 1–7 film formats, 8 Custom
+                                        current: root.picture;
+                                        selected(i) => { root.picture-chosen(i); }
+                                    }
                                 }
-                                HorizontalLayout {
+                                Row {
+                                    text: @tr("Width : height");
+                                    // one field like the old Custom: "2.39:1", "9:16", "21:9" or just "2.39" (typing only)
+                                    NumberField { text <=> root.aspect; scrub: 0; unit: ""; label: @tr("Width : height"); invalid: root.invalid == "aspect"; edited => { root.picture-edited(); } }
+                                }
+                                if root.picture != 0: Para { text: @tr("Black bars outside this format are cut off (top and bottom or left and right)."); }
+                                // a little room above paper and margin: the sheet in three groups
+                                Rectangle { height: 8px; }
+                                Row {
+                                    text: @tr("Paper");
+                                    SectionDropdown {
+                                        label: @tr("Paper");
+                                        entries: root.paper-menu;
+                                        text: root.paper-label;
+                                        // menu: 0 Custom, 1 heading, 2–8 DIN A0–A6, 9 heading, 10–16 social media sizes
+                                        current: root.paper == 0 ? 0 : root.paper <= 7 ? root.paper + 1 : root.paper + 2;
+                                        selected(i) => { root.paper-chosen(i == 0 ? 0 : i <= 8 ? i - 1 : i - 2); }
+                                    }
+                                }
+                                Row {
+                                    text: @tr("Unit");
+                                    Dropdown {
+                                        label: @tr("Unit");
+                                        items: ["mm", @tr("Pixels")];
+                                        current: root.px-units ? 1 : 0;
+                                        selected(i) => { root.unit-chosen(i == 1); }
+                                    }
+                                }
+                                Row {
+                                    text: @tr("Width × height");
+                                    NumberField { text <=> root.custom-w; scrub: root.px-units ? 4 : 1; step: 1; minimum: 10; unit: root.unit; label: @tr("Width"); invalid: root.invalid == "width"; edited => { root.size-edited(); } }
+                                    NumberField { text <=> root.custom-h; scrub: root.px-units ? 4 : 1; step: 1; minimum: 10; unit: root.unit; label: @tr("Height"); invalid: root.invalid == "height"; edited => { root.size-edited(); } }
+                                }
+                                Row {
+                                    text: @tr("Orientation");
+                                    Dropdown {
+                                        label: @tr("Orientation");
+                                        items: [@tr("Portrait"), @tr("Landscape")];
+                                        current: root.landscape ? 1 : 0;
+                                        selected(i) => { root.orientation-chosen(i == 1); }
+                                    }
+                                }
+                                Row {
+                                    text: @tr("Resolution");
+                                    NumberField { text <=> root.dpi; scrub: 1; step: 1; minimum: 10; unit: "dpi"; label: @tr("Resolution"); invalid: root.invalid == "dpi"; edited => { root.size-edited(); } }
+                                }
+                                Rectangle { height: 8px; }
+                                Row {
+                                    text: @tr("Margin");
+                                    NumberField {
+                                        text <=> root.margin; unit: root.unit; label: @tr("Margin"); invalid: root.invalid == "margin";
+                                        scrub: root.px-units ? 1 : 0.5; step: 1;
+                                        edited => { root.sheet-changed(); }
+                                    }
+                                }
+                                Row {
+                                    text: @tr("Gap between stills");
+                                    NumberField {
+                                        text <=> root.gap; unit: root.unit; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
+                                        scrub: root.px-units ? 0.5 : 0.1; step: 1;
+                                        edited => { root.sheet-changed(); }
+                                    }
+                                }
+                                Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
+                                Row {
+                                    text: @tr("Columns automatic");
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Switch { on: root.auto-cols; label: @tr("Columns automatic"); toggled => { root.auto-cols = !root.auto-cols; root.sheet-changed(); } }
+                                    }
+                                }
+                                if !root.auto-cols: Row {
+                                    text: @tr("Columns");
+                                    NumberField { text <=> root.cols; scrub: 0.1; step: 1; minimum: 1; unit: ""; label: @tr("Columns"); invalid: root.invalid == "columns"; edited => { root.sheet-changed(); } }
+                                }
+                                Row {
+                                    text: @tr("Crop marks");
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Switch { on: root.trim; label: @tr("Crop marks"); toggled => { root.trim = !root.trim; root.sheet-changed(); } }
+                                    }
+                                }
+                                if root.trim: Para { text: @tr("The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out."); }
+                                Para { text: root.sheet-info; }
+                            }
+                            // alignment start: free space goes below, never between the rows
+                            if root.side-tab == 2: VerticalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                vertical-stretch: 1;
+                                Row {
+                                    text: @tr("Frame line");
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Switch { on: root.line-on; label: @tr("Frame line"); toggled => { root.line-on = !root.line-on; root.sheet-changed(); } }
+                                    }
+                                }
+                                VerticalLayout {
                                     spacing: 6px;
-                                    Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                    NumberField { text <=> root.head-dy; scrub: root.px-units ? 2 : 0.5; step: 1; minimum: -99999; unit: root.unit; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                    Text { text: @tr("Pattern"); font-size: 12px; color: Theme.text; height: 22px; vertical-alignment: center; }
+                                    PatternPicker { current <=> root.line-pattern; chosen => { root.sheet-changed(); } }
+                                    Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
+                                    Row {
+                                        text: @tr("Thickness");
+                                        NumberField { text <=> root.line-width; scrub: 0.2; step: 1; minimum: 1; unit: "px"; label: @tr("Thickness"); invalid: root.invalid == "line-width"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Distance from the edge");
+                                        NumberField {
+                                            text <=> root.line-inset; scrub: 1; step: 1; unit: "px"; label: @tr("Distance from the edge"); invalid: root.invalid == "line-inset";
+                                            edited => { root.sheet-changed(); }
+                                        }
+                                    }
+                                    ColorRow {
+                                        text: @tr("Colour"); value <=> root.line-color; shown: root.line-swatch; invalid: root.invalid == "line-color";
+                                        palette: root.line-palette; slot: root.line-slot;
+                                        edited => { root.color-typed(0); root.sheet-changed(); }
+                                        swatch(i) => { root.color-swatch(0, i); }
+                            panel => { root.color-panel(0); }
+                                    }
+                                }
+                            }
+                            if root.side-tab == 3: VerticalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                vertical-stretch: 1;
+                                FieldFrame {
+                                    height: 26px;
+                                    border-color: head-input.has-focus ? Theme.accent : Theme.line;
+                                    if root.headline == "": Text {
+                                        x: 8px;
+                                        height: parent.height;
+                                        text: @tr("Headline (empty = none)");
+                                        font-size: 12px;
+                                        color: Theme.faint;
+                                        vertical-alignment: center;
+                                    }
+                                    head-input := TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: parent.height;
+                                        text <=> root.headline;
+                                        font-size: 12px;
+                                        color: Theme.text;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                        accessible-label: @tr("Headline");
+                                        edited => { root.sheet-changed(); }
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    Row {
+                                        text: @tr("Font");
+                                        FontDropdown {
+                                            width: 240px;
+                                            label: @tr("Font");
+                                            fonts: root.fonts;
+                                            current <=> root.font;
+                                            chosen => { root.sheet-changed(); }
+                                            jump(t) => { return root.jump-font(t); }
+                                        }
+                                    }
+                                    Row {
+                                        text: @tr("Size");
+                                        StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
+                                        StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
+                                        NumberField { text <=> root.head-size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
+                                    }
+                                    ColorRow {
+                                        text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color";
+                                        palette: root.head-palette; slot: root.head-slot;
+                                        edited => { root.color-typed(1); root.sheet-changed(); }
+                                        swatch(i) => { root.color-swatch(1, i); }
+                            panel => { root.color-panel(1); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            Text { text: @tr("Anchor"); font-size: 12px; color: Theme.text; }
+                                            AnchorPicker { current: root.head-anchor; chosen(i) => { root.anchor-chosen(i); } }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        VerticalLayout {
+                                            spacing: 6px;
+                                            alignment: end;
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                                                NumberField { text <=> root.head-dx; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                                                NumberField { text <=> root.head-dy; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                            }
+                                        }
+                                    }
+                                    Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
+                                    Para { text: @tr("The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."); }
+                                    Row {
+                                        text: @tr("Grid");
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Switch { on: root.head-grid; label: @tr("Grid"); toggled => { root.head-grid = !root.head-grid; } }
+                                        }
+                                    }
+                                    if root.head-grid: Row {
+                                        text: @tr("Grid every");
+                                        NumberField { text <=> root.head-grid-step; scrub: 0.05; step: 1; minimum: 1; unit: "%"; label: @tr("Grid every"); }
+                                    }
+                                    if root.head-grid: Para { text: @tr("The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."); }
                                 }
                             }
                         }
-                        Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
-                        Para { text: @tr("The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."); }
                     }
+                    ScrollThumb { x: parent.width + 10px; view: side-flick.height; content: tabs.preferred-height; offset: side-flick.content-y; }
                 }
+                Rectangle { height: 6px; }
 
                 // presets and export stay at the bottom on every tab
                 SectionLabel { text: @tr("PRESET"); }
@@ -2280,38 +2457,24 @@ export component AppWindow inherits SheetWindow {
                     accessible-label: @tr("Preview of the sheet");
                 }
             }
-            // on the Headline tab the headline can be dragged; its frame stays put while dragging (the preview
-            // follows from Rust, the frame would otherwise run away under the mouse)
-            if root.side-tab == 3 && root.headline != "" && root.head-bw > 0: Rectangle {
-                property <float> bx0;
-                property <float> by0;
-                property <float> dx0;
-                property <float> dy0;
-                x: page.x + page.width * (hd.pressed ? self.bx0 : root.head-bx) - 4px;
-                y: page.y + page.height * (hd.pressed ? self.by0 : root.head-by) - 4px;
-                width: page.width * root.head-bw + 8px;
-                height: page.height * root.head-bh + 8px;
-                border-width: 1px;
-                border-radius: 3px;
-                border-color: hd.has-hover || hd.pressed ? Theme.accent : Theme.accent.with-alpha(0.35);
-                hd := TouchArea {
-                    mouse-cursor: move;
-                    pointer-event(e) => {
-                        if e.kind == PointerEventKind.down {
-                            parent.bx0 = root.head-bx;
-                            parent.by0 = root.head-by;
-                            parent.dx0 = root.head-dx.is-float() ? root.head-dx.to-float() : 0;
-                            parent.dy0 = root.head-dy.is-float() ? root.head-dy.to-float() : 0;
-                        }
-                    }
-                    moved => {
-                        if self.pressed {
-                            let per = root.page-w / (page.width / 1px);
-                            root.head-dx = Math.round(parent.dx0 + (self.mouse-x - self.pressed-x) / 1px * per);
-                            root.head-dy = Math.round(parent.dy0 + (self.mouse-y - self.pressed-y) / 1px * per);
-                            root.sheet-changed();
-                        }
-                    }
+            // grid in percent of the trim area (the page without crop marks), where the headline hangs (Headline
+            // tab); the 50 % lines stronger; each line centred on its place, like the ticks of the headline frame
+            if root.side-tab == 3 && root.head-grid: Rectangle {
+                x: page.x + page.width * root.trim-x;
+                y: page.y + page.height * root.trim-y;
+                width: page.width * root.trim-w;
+                height: page.height * root.trim-h;
+                for i in Math.ceil(100 / root.grid-step) - 1: Rectangle {
+                    x: parent.width * (i + 1) * root.grid-step / 100 - 0.5px;
+                    width: 1px;
+                    height: parent.height;
+                    background: Theme.accent.with-alpha((i + 1) * root.grid-step == 50 ? 0.6 : 0.25);
+                }
+                for i in Math.ceil(100 / root.grid-step) - 1: Rectangle {
+                    y: parent.height * (i + 1) * root.grid-step / 100 - 0.5px;
+                    height: 1px;
+                    width: parent.width;
+                    background: Theme.accent.with-alpha((i + 1) * root.grid-step == 50 ? 0.6 : 0.25);
                 }
             }
             // pinch on the trackpad
@@ -2348,6 +2511,71 @@ export component AppWindow inherits SheetWindow {
                             return reject;
                         }
                         accept
+                    }
+                }
+            }
+            // above the pan / zoom area, so it gets the mouse first (below it, a drag only reached the pan area).
+            // On the Headline tab the headline can be dragged: the frame and its ticks go where X and Y put the text
+            // (the preview follows from Rust a moment later); the area that takes the mouse stays put while dragging,
+            // so the way of the mouse is measured from a fixed place. With the grid on, the middle snaps to a grid
+            // line it comes within 6 screen pixels of, so it can lie exactly on it.
+            if root.side-tab == 3 && root.headline != "" && root.head-bw > 0: Rectangle {
+                width: desk.width;
+                height: desk.height;
+                property <float> bx0;
+                property <float> by0;
+                property <float> dx0;
+                property <float> dy0;
+                property <float> page-h-px: root.page-px / root.page-aspect;
+                property <float> dx: root.head-dx.is-float() ? root.head-dx.to-float() : 0;
+                property <float> dy: root.head-dy.is-float() ? root.head-dy.to-float() : 0;
+                frame := Rectangle {
+                    x: page.x + page.width * (hd.pressed ? parent.bx0 + (parent.dx - parent.dx0) / root.page-px : root.head-bx) - 4px;
+                    y: page.y + page.height * (hd.pressed ? parent.by0 + (parent.dy - parent.dy0) / parent.page-h-px : root.head-by) - 4px;
+                    width: page.width * root.head-bw + 8px;
+                    height: page.height * root.head-bh + 8px;
+                    border-width: 1px;
+                    border-radius: 3px;
+                    border-color: hd.has-hover || hd.pressed ? Theme.accent : Theme.accent.with-alpha(0.35);
+                    // ticks across the frame at the middle of each side: where the centre of the text is; green when
+                    // the middle lies on a grid line (top / bottom ticks: a vertical line, left / right: a horizontal one)
+                    Rectangle { x: parent.width / 2 - 1px; y: -7px; width: 2px; height: 14px; background: root.on-grid-x ? Theme.online : Theme.accent; }
+                    Rectangle { x: parent.width / 2 - 1px; y: parent.height - 7px; width: 2px; height: 14px; background: root.on-grid-x ? Theme.online : Theme.accent; }
+                    Rectangle { x: -7px; y: parent.height / 2 - 1px; width: 14px; height: 2px; background: root.on-grid-y ? Theme.online : Theme.accent; }
+                    Rectangle { x: parent.width - 7px; y: parent.height / 2 - 1px; width: 14px; height: 2px; background: root.on-grid-y ? Theme.online : Theme.accent; }
+                }
+                hd := TouchArea {
+                    x: page.x + page.width * (self.pressed ? parent.bx0 : root.head-bx) - 4px;
+                    y: page.y + page.height * (self.pressed ? parent.by0 : root.head-by) - 4px;
+                    width: frame.width;
+                    height: frame.height;
+                    mouse-cursor: move;
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down {
+                            parent.bx0 = root.head-bx;
+                            parent.by0 = root.head-by;
+                            parent.dx0 = parent.dx;
+                            parent.dy0 = parent.dy;
+                        }
+                    }
+                    moved => {
+                        if self.pressed {
+                            let per = root.page-px / (page.width / 1px);
+                            let ddx = (self.mouse-x - self.pressed-x) / 1px * per;
+                            let ddy = (self.mouse-y - self.pressed-y) / 1px * per;
+                            // the middle as a fraction of the page, and the nearest grid line
+                            let cx = parent.bx0 + root.head-bw / 2 + ddx / root.page-px;
+                            let cy = parent.by0 + root.head-bh / 2 + ddy / parent.page-h-px;
+                            let kx = Math.round((cx - root.trim-x) / root.trim-w * 100 / root.grid-step) * root.grid-step;
+                            let ky = Math.round((cy - root.trim-y) / root.trim-h * 100 / root.grid-step) * root.grid-step;
+                            let lx = root.trim-x + root.trim-w * kx / 100;
+                            let ly = root.trim-y + root.trim-h * ky / 100;
+                            let snap-x = root.head-grid && kx > 0 && kx < 100 && Math.abs(lx - cx) * page.width < 6px;
+                            let snap-y = root.head-grid && ky > 0 && ky < 100 && Math.abs(ly - cy) * page.height < 6px;
+                            root.head-dx = Math.round(parent.dx0 + ddx + (snap-x ? (lx - cx) * root.page-px : 0));
+                            root.head-dy = Math.round(parent.dy0 + ddy + (snap-y ? (ly - cy) * parent.page-h-px : 0));
+                            root.sheet-changed();
+                        }
                     }
                 }
             }

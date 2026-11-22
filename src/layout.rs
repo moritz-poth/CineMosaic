@@ -387,16 +387,43 @@ fn draw_text(page: &mut RgbImage, hl: &Headline, x: f64, baseline: f64, scale: P
 /// Draws the sheet. `still(i)` delivers still i (any size; it covers its cell). None leaves the cell grey.
 /// Stills are loaded one at a time, so a big sheet never holds all.
 pub fn render(sheet: &Sheet, n: usize, aspect: f64, mut still: impl FnMut(usize) -> Option<RgbImage>) -> RgbImage {
+    let grid = sheet.grid(n, aspect);
+    compose(sheet, n, &grid, |i, cw, ch| still(i).map(|img| cover(&img, cw, ch)))
+}
+
+/// Like `render`, for the preview: `tile(i, width, height)` gives still `i` already at its cell size (a cache can
+/// answer it), and the tiles are made on all cores.
+pub fn render_tiles(sheet: &Sheet, n: usize, aspect: f64, tile: impl Fn(usize, u32, u32) -> Option<RgbImage> + Sync) -> RgbImage {
+    let grid = sheet.grid(n, aspect);
+    let mut tiles: Vec<Option<RgbImage>> = vec![None; n];
+    let per = n.div_ceil(std::thread::available_parallelism().map_or(4, |c| c.get())).max(1);
+    std::thread::scope(|s| {
+        for (k, chunk) in tiles.chunks_mut(per).enumerate() {
+            let (grid, tile) = (&grid, &tile);
+            s.spawn(move || {
+                for (j, t) in chunk.iter_mut().enumerate() {
+                    let (_, _, cw, ch) = grid.cell(k * per + j);
+                    *t = tile(k * per + j, cw, ch);
+                }
+            });
+        }
+    });
+    let mut tiles = tiles.into_iter();
+    compose(sheet, n, &grid, |_, _, _| tiles.next().flatten())
+}
+
+/// The still `img` filling a cell of `cw` × `ch` (cut to it, centred).
+pub fn cover_cell(img: &RgbImage, cw: u32, ch: u32) -> RgbImage {
+    cover(img, cw, ch)
+}
+
+fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32, u32) -> Option<RgbImage>) -> RgbImage {
     let (w, h) = sheet.size_px();
     let mut page = RgbImage::from_pixel(w, h, Rgb([255, 255, 255]));
     let plan = sheet.plan();
-    let grid = sheet.grid(n, aspect);
     for i in 0..n {
         let (x, y, cw, ch) = grid.cell(i);
-        let tile = match still(i) {
-            Some(img) => cover(&img, cw, ch),
-            None => RgbImage::from_pixel(cw, ch, Rgb([200, 200, 200])),
-        };
+        let tile = tile(i, cw, ch).unwrap_or_else(|| RgbImage::from_pixel(cw, ch, Rgb([200, 200, 200])));
         imageops::overlay(&mut page, &tile, x as i64, y as i64);
     }
     if let (Some((outer, t)), Some(l)) = (plan.line, &sheet.line) {

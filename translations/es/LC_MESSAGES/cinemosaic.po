@@ -428,6 +428,15 @@ msgstr "Ajustar toda la hoja"
 msgid "Sheet"
 msgstr "Hoja"
 
+msgid "Grid"
+msgstr "Cuadrícula"
+
+msgid "Grid every"
+msgstr "Cuadrícula cada"
+
+msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."
+msgstr "La cuadrícula solo se ve en la vista previa, no se exporta. Cubre la página, o la zona dentro de las marcas de corte; las líneas más marcadas son su centro. Las pequeñas marcas del marco del título se vuelven verdes cuando el centro del texto está sobre una línea de la cuadrícula."
+
 msgid "Crop marks"
 msgstr "Marcas de corte"
 
@@ -445,21 +454,6 @@ msgstr "Distancia al borde"
 
 msgid "Colour"
 msgstr "Color"
-
-msgid "Black"
-msgstr "Negro"
-
-msgid "Dark grey"
-msgstr "Gris oscuro"
-
-msgid "Grey"
-msgstr "Gris"
-
-msgid "White"
-msgstr "Blanco"
-
-msgid "Red"
-msgstr "Rojo"
 
 msgid "Headline"
 msgstr "Título"
