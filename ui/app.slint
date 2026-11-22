@@ -152,20 +152,22 @@ component Switch inherits Rectangle {
     }
 }
 
-// Mountpoint dropdown: Ferry-style button with value and chevron, the native menu below it, current entry disabled
-component Dropdown {
-    in property <[string]> items;
-    in property <int> current;
+// Mountpoint dropdown button: Ferry-style frame with the value and a chevron. The dropdowns below put it inside a
+// ContextMenuArea with their own native menu, which opens below the button on a click.
+component MenuButton {
+    in property <string> text;
     in property <string> label;
-    callback selected(int);
+    // long values are cut off with "…" (the sequence list)
+    in property <length> text-max: 1000px;
+    callback clicked;
     height: 26px;
     min-width: row.preferred-width;
     max-width: row.preferred-width;
     horizontal-stretch: 0;
     accessible-role: combobox;
     accessible-label: root.label;
-    accessible-value: root.items[root.current];
-    accessible-action-default => { menu.show({ x: 0, y: root.height + 4px }); }
+    accessible-value: root.text;
+    accessible-action-default => { root.clicked(); }
     Rectangle {
         border-radius: 6px;
         border-width: 1px;
@@ -176,23 +178,28 @@ component Dropdown {
         padding-left: 12px;
         padding-right: 12px;
         spacing: 6px;
-        Text {
-            text: root.items[root.current];
-            font-size: 12px;
-            vertical-alignment: center;
-            color: Theme.text;
-        }
+        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: Theme.text; overflow: elide; max-width: root.text-max; }
         VerticalLayout {
             alignment: center;
-            Path {
-                width: 8px;
-                height: 5px;
-                commands: "M 0 0 L 4 4 L 8 0";
-                stroke: Theme.text;
-                stroke-width: 1.5px;
-            }
+            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
         }
     }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Choice from a list: the native menu, the current entry disabled
+component Dropdown {
+    in property <[string]> items;
+    in property <int> current;
+    in property <string> label;
+    callback selected(int);
+    min-width: b.min-width;
+    max-width: b.max-width;
+    height: b.height;
+    horizontal-stretch: 0;
     menu := ContextMenuArea {
         Menu {
             for item[i] in root.items: MenuItem {
@@ -201,10 +208,7 @@ component Dropdown {
                 activated => { root.selected(i); }
             }
         }
-        touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { menu.show({ x: 0, y: root.height + 4px }); }
-        }
+        b := MenuButton { text: root.items[root.current]; label: root.label; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
     }
 }
 
@@ -215,31 +219,11 @@ component CheckDropdown {
     in property <string> text;
     in property <string> label;
     callback selected(int);
-    height: 26px;
-    min-width: crow.preferred-width;
-    max-width: crow.preferred-width;
+    min-width: b.min-width;
+    max-width: b.max-width;
+    height: b.height;
     horizontal-stretch: 0;
-    accessible-role: combobox;
-    accessible-label: root.label;
-    accessible-value: root.text;
-    accessible-action-default => { cmenu.show({ x: 0, y: root.height + 4px }); }
-    Rectangle {
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: Theme.line;
-        background: ctouch.pressed ? Theme.text.with-alpha(0.12) : ctouch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
-    }
-    crow := HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 6px;
-        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: Theme.text; overflow: elide; max-width: 220px; }
-        VerticalLayout {
-            alignment: center;
-            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
-        }
-    }
-    cmenu := ContextMenuArea {
+    menu := ContextMenuArea {
         Menu {
             for e[i] in root.entries: MenuItem {
                 title: e.title;
@@ -248,46 +232,23 @@ component CheckDropdown {
                 activated => { root.selected(i); }
             }
         }
-        ctouch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { cmenu.show({ x: 0, y: root.height + 4px }); }
-        }
+        b := MenuButton { text: root.text; label: root.label; text-max: 220px; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
     }
 }
 
-// Dropdown with sections: entries whose `checked` is set are section titles (not choosable)
+// Dropdown with sections: entries whose `checked` is set are section titles (not choosable); the button shows `text`
+// (the menu entries may be longer)
 component SectionDropdown {
     in property <[MenuChoice]> entries;
     in property <int> current;
-    // what the button shows (the menu entries may be longer)
     in property <string> text;
     in property <string> label;
     callback selected(int);
-    height: 26px;
-    min-width: srow.preferred-width;
-    max-width: srow.preferred-width;
+    min-width: b.min-width;
+    max-width: b.max-width;
+    height: b.height;
     horizontal-stretch: 0;
-    accessible-role: combobox;
-    accessible-label: root.label;
-    accessible-value: root.entries[root.current].title;
-    accessible-action-default => { smenu.show({ x: 0, y: root.height + 4px }); }
-    Rectangle {
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: Theme.line;
-        background: stouch.pressed ? Theme.text.with-alpha(0.12) : stouch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
-    }
-    srow := HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 6px;
-        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: Theme.text; }
-        VerticalLayout {
-            alignment: center;
-            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
-        }
-    }
-    smenu := ContextMenuArea {
+    menu := ContextMenuArea {
         Menu {
             for e[i] in root.entries: MenuItem {
                 title: e.checked ? e.title.to-uppercase() : e.title;
@@ -295,14 +256,11 @@ component SectionDropdown {
                 activated => { root.selected(i); }
             }
         }
-        stouch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { smenu.show({ x: 0, y: root.height + 4px }); }
-        }
+        b := MenuButton { text: root.text; label: root.label; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
     }
 }
 
-// Presets: Dropdown look; the menu lists the presets (the current one ticked off) plus new / update / rename / delete
+// Presets: the presets (the current one disabled) plus new / update / rename / delete
 component PresetMenu {
     in property <[string]> items;
     in property <int> current;
@@ -312,30 +270,10 @@ component PresetMenu {
     callback update();
     callback rename();
     callback delete();
-    height: 26px;
-    min-width: row.preferred-width;
-    max-width: row.preferred-width;
+    min-width: b.min-width;
+    max-width: b.max-width;
+    height: b.height;
     horizontal-stretch: 0;
-    accessible-role: combobox;
-    accessible-label: @tr("Preset");
-    accessible-value: root.title;
-    accessible-action-default => { menu.show({ x: 0, y: root.height + 4px }); }
-    Rectangle {
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: Theme.line;
-        background: touch.pressed ? Theme.text.with-alpha(0.12) : touch.has-hover ? Theme.text.with-alpha(0.06) : transparent;
-    }
-    row := HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 6px;
-        Text { text: root.title; font-size: 12px; vertical-alignment: center; color: Theme.text; }
-        VerticalLayout {
-            alignment: center;
-            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
-        }
-    }
     menu := ContextMenuArea {
         Menu {
             for item[i] in root.items: MenuItem { title: item; enabled: i != root.current; activated => { root.chosen(i); } }
@@ -345,10 +283,7 @@ component PresetMenu {
             if root.current >= 0: MenuItem { title: @tr("Rename…"); activated => { root.rename(); } }
             if root.current >= 0: MenuItem { title: @tr("Delete…"); activated => { root.delete(); } }
         }
-        touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { menu.show({ x: 0, y: root.height + 4px }); }
-        }
+        b := MenuButton { text: root.title; label: @tr("Preset"); clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
     }
 }
 

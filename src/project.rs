@@ -29,8 +29,6 @@ pub struct Project {
     /// masters without a cut list: the cuts found in the picture (first frame of every shot, then the frame count)
     pub detected: Vec<(PathBuf, Vec<i64>)>,
     pub bin: Option<PathBuf>,
-    /// bin mode, projects before 2026-11-21: 0 all sequences, 1.. one of them
-    pub sequence: i32,
     /// bin mode: the sequences shown, by name (None = all)
     pub chosen: Option<Vec<String>>,
     /// volumes switched off (bin mode); new volumes are on
@@ -78,11 +76,6 @@ struct FileProject {
     app: String,
     format: u32,
     mode: i32,
-    /// projects before 2026-11-21 (one master, one list)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    master: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    list: Option<PathBuf>,
     #[serde(default)]
     masters: Vec<PathBuf>,
     #[serde(default)]
@@ -90,7 +83,6 @@ struct FileProject {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     detected: Vec<(PathBuf, Vec<i64>)>,
     bin: Option<PathBuf>,
-    sequence: i32,
     #[serde(default)]
     chosen: Option<Vec<String>>,
     volumes_off: Vec<PathBuf>,
@@ -148,13 +140,10 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         app: "CineMosaic".into(),
         format: FORMAT,
         mode: p.mode,
-        master: None,
-        list: None,
         masters: p.masters.clone(),
         lists: p.lists.clone(),
         detected: p.detected.clone(),
         bin: p.bin.clone(),
-        sequence: p.sequence,
         chosen: p.chosen.clone(),
         volumes_off: p.volumes_off.clone(),
         look: p.look.clone(),
@@ -232,11 +221,10 @@ pub fn load(path: &Path) -> Result<Project, String> {
         .collect();
     Ok(Project {
         mode: fp.mode,
-        masters: fp.masters.into_iter().chain(fp.master).filter(|p| p.is_absolute()).collect(),
-        lists: fp.lists.into_iter().chain(fp.list).filter(|p| p.is_absolute()).collect(),
+        masters: fp.masters.into_iter().filter(|p| p.is_absolute()).collect(),
+        lists: fp.lists.into_iter().filter(|p| p.is_absolute()).collect(),
         detected: fp.detected,
         bin: local(fp.bin),
-        sequence: fp.sequence,
         chosen: fp.chosen,
         volumes_off: fp.volumes_off,
         look: fp.look,
@@ -270,7 +258,6 @@ mod tests {
             lists: vec!["/c.edl".into()],
             detected: vec![("/n.mov".into(), vec![0, 40, 90])],
             bin: None,
-            sequence: 0,
             chosen: Some(vec!["Reel 1".into()]),
             volumes_off: vec![],
             look: serde_json::json!({"margin": "10"}),

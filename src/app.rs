@@ -3,6 +3,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 slint::include_modules!();
+mod mac;
+mod presets;
+mod tc;
+use presets::{PRESETS, apply_preset, load_presets, preset_json, preset_menu, store_presets};
+use tc::{clipboard_text, tc_edit, tc_parts, tc_pasted};
+use mac::color_panel;
+#[cfg(target_os = "macos")]
+use mac::{mac_app, mac_menu, mac_window};
 
 use image::RgbImage;
 use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer};
@@ -771,12 +779,15 @@ fn match_slots(app: &AppWindow) {
     app.set_head_slot(slot(app.get_head_palette(), app.get_head_color()));
 }
 
-/// Preset `slot` of palette `k` gets colour `c`; saved, every window shows it.
-fn set_palette_entry(settings: &RefCell<Settings>, k: usize, slot: usize, c: [u8; 3]) {
+/// Preset `slot` of palette `k` gets colour `c`; every window shows it. `save`: write the settings now (the colour
+/// panel saves once when it closes, not with every colour it passes through).
+fn set_palette_entry(settings: &RefCell<Settings>, k: usize, slot: usize, c: [u8; 3], save: bool) {
     let mut s = settings.borrow_mut();
     let Some(e) = s.palettes[k].get_mut(slot) else { return };
     *e = hex_text(c);
-    save_settings(&s);
+    if save {
+        save_settings(&s);
+    }
     all_windows().iter().for_each(|w| show_palettes(w, &s));
 }
 
@@ -910,198 +921,6 @@ fn apply_font(app: &AppWindow) {
         }
     }
     refresh(app);
-}
-
-thread_local! {
-    /// the presets by name, sorted; loaded at start, written to presets.json after every change
-    static PRESETS: RefCell<Vec<(String, serde_json::Value)>> = const { RefCell::new(Vec::new()) };
-}
-
-fn presets_path() -> Option<PathBuf> {
-    app_dir().map(|d| d.join("presets.json"))
-}
-
-/// Reads presets.json (a missing or broken file = no presets) and fills the menu.
-fn load_presets() {
-    let list: Vec<(String, serde_json::Value)> = presets_path()
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice::<Vec<serde_json::Value>>(&b).ok())
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|e| Some((e.get("name")?.as_str()?.to_string(), e.get("values")?.clone())))
-        .collect();
-    PRESETS.with(|p| *p.borrow_mut() = list);
-}
-
-/// The preset menu in every window.
-// shortcut: another window's chosen preset index is not moved when a preset is added or deleted elsewhere
-fn preset_menu(_app: &AppWindow) {
-    let model: Vec<SharedString> = PRESETS.with(|p| p.borrow().iter().map(|e| e.0.as_str().into()).collect());
-    for a in all_windows() {
-        a.set_presets(ModelRc::new(VecModel::from(model.clone())));
-    }
-}
-
-/// Writes all presets atomically and refreshes the menu; `status` is the line under it when saving works.
-fn store_presets(app: &AppWindow, status: String) {
-    preset_menu(app);
-    let list: Vec<serde_json::Value> = PRESETS.with(|p| p.borrow().iter().map(|(n, v)| serde_json::json!({"name": n, "values": v})).collect());
-    let result = presets_path().ok_or_else(|| std::io::Error::other("no home folder")).and_then(|path| {
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let part = path.with_extension("json.part");
-        std::fs::write(&part, serde_json::to_vec_pretty(&list).unwrap_or_default())?;
-        std::fs::rename(&part, &path)
-    });
-    match result {
-        Ok(()) => app.set_preset_status(status.into()),
-        Err(e) => {
-            log::write(&format!("presets not saved: {e}"));
-            app.set_preset_status(tr(["Could not save the presets: {}", "Presets ließen sich nicht sichern: {}", "Impossible d'enregistrer les préréglages : {}", "No se pudieron guardar los preajustes: {}"]).replacen("{}", &e.to_string(), 1).into());
-        }
-    }
-}
-
-/// Everything about the look of the sheet, as JSON: paper, picture format, line, headline style and place, crop
-/// marks, export format. Not the source and not the headline text: they belong to the project. The font is kept by
-/// name, so the preset works on another Mac.
-fn preset_json(app: &AppWindow) -> serde_json::Value {
-    let font = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned()).unwrap_or_default();
-    serde_json::json!({
-        "px-units": app.get_px_units(), "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
-        "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "spacing-px": true, "margin": app.get_margin().as_str(),
-        "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
-        "picture": app.get_picture(), "aspect": app.get_aspect().as_str(), "trim": app.get_trim(),
-        "line-on": app.get_line_on(), "lengths-px": true, "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
-        "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
-        "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
-        "head-color": app.get_head_color().as_str(), "head-anchor": app.get_head_anchor(),
-        "head-dx": app.get_head_dx().as_str(), "head-dy": app.get_head_dy().as_str(),
-        "head-pad": [app.get_head_pad_t().as_str(), app.get_head_pad_r().as_str(), app.get_head_pad_b().as_str(), app.get_head_pad_l().as_str()],
-        "head-wrap": app.get_head_wrap(),
-        "export-format": app.get_export_format(),
-    })
-}
-
-/// Sets the fields from a preset. Missing or wrong keys keep the field as it is (older or newer presets).
-fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
-    let int = |k: &str, max: i64, set: &dyn Fn(i32)| {
-        if let Some(n) = v.get(k).and_then(|x| x.as_i64()).filter(|n| (0..=max).contains(n)) {
-            set(n as i32)
-        }
-    };
-    let boolean = |k: &str, set: &dyn Fn(bool)| v.get(k).and_then(|x| x.as_bool()).into_iter().for_each(set);
-    let text = |k: &str, set: &dyn Fn(SharedString)| v.get(k).and_then(|x| x.as_str()).filter(|s| s.len() < 100).into_iter().for_each(|s| set(s.into()));
-    boolean("px-units", &|b| app.set_px_units(b));
-    int("paper", (layout::DIN.len() + layout::SOCIAL.len()) as i64, &|n| app.set_paper(n));
-    text("custom-w", &|s| app.set_custom_w(s));
-    text("custom-h", &|s| app.set_custom_h(s));
-    boolean("landscape", &|b| app.set_landscape(b));
-    text("dpi", &|s| app.set_dpi(s));
-    text("margin", &|s| app.set_margin(s));
-    text("gap", &|s| app.set_gap(s));
-    boolean("auto-cols", &|b| app.set_auto_cols(b));
-    text("cols", &|s| app.set_cols(s));
-    let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
-    if let Some(a) = field("aspect").or_else(|| Some(format!("{}:{}", field("aspect-w")?, field("aspect-h")?))) {
-        // since 2026-11-21: the format as typed ("2.39:1", "9:16"); for a few hours two fields
-        // until 2026-11-22 the menu held social media formats too (8–14, Custom 15): the format decides
-        int("picture", 15, &|n| app.set_picture(n));
-        app.set_aspect(a.into());
-        if app.get_picture() > 0 {
-            picture_edited(app);
-        }
-    } else {
-        // presets from before: 1–7 = the film formats of then, 8 = Custom "2.39" or "21:9"
-        const THEN: [&str; 7] = ["4:3", "1.66:1", "16:9", "1.85:1", "2:1", "2.35:1", "2.39:1"];
-        int("picture", 8, &|n| app.set_picture(n));
-        let then = app.get_picture() as usize;
-        if then > 0 {
-            let c = THEN.get(then - 1).map(|s| s.to_string()).unwrap_or_else(|| field("custom-aspect").unwrap_or_else(|| "2.39".into()));
-            app.set_aspect(if c.contains(':') { c } else { format!("{c}:1") }.into());
-            picture_edited(app);
-        }
-    }
-    show_picture(app);
-    boolean("trim", &|b| app.set_trim(b));
-    boolean("line-on", &|b| app.set_line_on(b));
-    text("line-width", &|s| app.set_line_width(s));
-    text("line-inset", &|s| app.set_line_inset(s));
-    text("line-color", &|s| app.set_line_color(s));
-    int("line-pattern", layout::Pattern::ALL.len() as i64 - 1, &|n| app.set_line_pattern(n));
-    if let Some(name) = v.get("font").and_then(|x| x.as_str()).filter(|n| !n.is_empty()) {
-        with_state(app, |st| st.borrow_mut().font_wanted = Some(name.to_string()));
-        apply_font(app);
-    }
-    text("head-size", &|s| app.set_head_size(s));
-    boolean("head-bold", &|b| app.set_head_bold(b));
-    boolean("head-italic", &|b| app.set_head_italic(b));
-    text("head-color", &|s| app.set_head_color(s));
-    int("head-anchor", 8, &|n| app.set_head_anchor(n));
-    text("head-dx", &|s| app.set_head_dx(s));
-    text("head-dy", &|s| app.set_head_dy(s));
-    // since 2026-11-22: space around the headline and stills flowing around it (older presets keep the fields)
-    if let Some(p) = v.get("head-pad").and_then(|x| x.as_array()).filter(|p| p.len() == 4) {
-        let sets: [fn(&AppWindow, SharedString); 4] = [AppWindow::set_head_pad_t, AppWindow::set_head_pad_r, AppWindow::set_head_pad_b, AppWindow::set_head_pad_l];
-        for (x, set) in p.iter().zip(sets) {
-            if let Some(t) = x.as_str().filter(|t| t.len() < 10) {
-                set(app, t.into());
-            }
-        }
-    }
-    boolean("head-wrap", &|b| app.set_head_wrap(b));
-    int("export-format", 3, &|n| app.set_export_format(n));
-    match_slots(app);
-    // presets from before whole numbers: round
-    for (get, set) in [
-        (AppWindow::get_margin as Getter, AppWindow::set_margin as Setter),
-        (AppWindow::get_gap, AppWindow::set_gap),
-        (AppWindow::get_line_inset, AppWindow::set_line_inset),
-        (AppWindow::get_head_size, AppWindow::set_head_size),
-        (AppWindow::get_head_dx, AppWindow::set_head_dx),
-        (AppWindow::get_head_dy, AppWindow::set_head_dy),
-    ] {
-        if let Ok(v) = num(&get(app), f64::MIN, f64::MAX, "") {
-            set(app, format!("{}", v.round() as i64).into());
-        }
-    }
-    if let Ok(v) = num(&app.get_line_width(), f64::MIN, f64::MAX, "") {
-        app.set_line_width(format!("{}", v.round().max(1.0) as i64).into());
-    }
-    // until 2026-11-22 frame line and headline place were in the unit of the Sheet tab; now always px
-    if v.get("lengths-px").is_none() && !app.get_px_units() {
-        let per = mm_per_px(app);
-        for (get, set, least) in [
-            (AppWindow::get_line_width as Getter, AppWindow::set_line_width as Setter, 1.0),
-            (AppWindow::get_line_inset, AppWindow::set_line_inset, 0.0),
-            (AppWindow::get_head_dx, AppWindow::set_head_dx, f64::MIN),
-            (AppWindow::get_head_dy, AppWindow::set_head_dy, f64::MIN),
-        ] {
-            if let Ok(x) = whole(&get(app), "") {
-                set(app, in_unit(x.max(least), per));
-            }
-        }
-    }
-    // until 2026-11-22 margin and gap were in the unit of the Sheet tab; now always px
-    if v.get("spacing-px").is_none() && !app.get_px_units() {
-        let per = mm_per_px(app);
-        for (get, set) in [(AppWindow::get_margin as Getter, AppWindow::set_margin as Setter), (AppWindow::get_gap, AppWindow::set_gap)] {
-            if let Ok(x) = whole(&get(app), "") {
-                set(app, in_unit(x, per));
-            }
-        }
-    }
-    // the fields show the size: an A size from the list, a custom one turned to the orientation (older presets
-    // kept it unturned)
-    if app.get_paper() > 0 {
-        show_paper(app);
-    } else if let (Ok(w), Ok(h)) = (whole(&app.get_custom_w(), ""), whole(&app.get_custom_h(), ""))
-        && w != h
-        && (w > h) != app.get_landscape()
-    {
-        let (cw, ch) = (app.get_custom_w(), app.get_custom_h());
-        app.set_custom_w(ch);
-        app.set_custom_h(cw);
-    }
 }
 
 /// Picture format to crop to: None = full frame; Err = width : height is not a format.
@@ -1279,28 +1098,32 @@ fn start_renderer(weak: slint::Weak<AppWindow>, latest: Arc<AtomicUsize>) -> std
     let (tx, rx) = std::sync::mpsc::channel::<RenderJob>();
     std::thread::spawn(move || {
         // stills already scaled to their cell: a change of font, colour or pattern (cells unchanged) needs none
-        // scaled again; forgotten when the stills change
+        // scaled again. Only the tiles of the last picture are kept (zooming would otherwise pile up sets of
+        // ~130 MB); forgotten when the stills change
         type Key = (Pick, u32, u32, Option<u64>);
-        let mut cache: (Option<Arc<HashMap<Pick, RgbImage>>>, HashMap<Key, RgbImage>) = (None, HashMap::new());
+        // the stills these tiles were made from, and the tiles
+        let mut from: Option<Arc<HashMap<Pick, RgbImage>>> = None;
+        let mut cache: HashMap<Key, RgbImage> = HashMap::new();
         while let Ok(mut job) = rx.recv() {
             while let Ok(newer) = rx.try_recv() {
                 job = newer;
             }
-            if !cache.0.as_ref().is_some_and(|t| Arc::ptr_eq(t, &job.thumbs)) || cache.1.len() > 8 * job.picks.len() + 64 {
-                cache = (Some(job.thumbs.clone()), HashMap::new());
+            if !from.as_ref().is_some_and(|t| Arc::ptr_eq(t, &job.thumbs)) {
+                from = Some(job.thumbs.clone());
+                cache.clear();
             }
             let picture = job.picture.map(f64::to_bits);
-            let (done, made) = (&cache.1, std::sync::Mutex::new(Vec::new()));
+            let (done, used) = (&cache, std::sync::Mutex::new(Vec::new()));
             let page = layout::render_tiles(&job.sheet, job.picks.len(), job.aspect, |i, cw, ch| {
-                let key = (job.picks[i].clone(), cw, ch, picture);
-                if let Some(t) = done.get(&key) {
-                    return Some(t.clone());
-                }
-                let t = layout::cover_cell(&cropped(job.thumbs.get(&job.picks[i])?.clone(), job.picture), cw, ch);
-                made.lock().unwrap().push((key, t.clone()));
+                let key = (job.picks[i], cw, ch, picture);
+                let t = match done.get(&key) {
+                    Some(t) => t.clone(),
+                    None => layout::cover(&cropped(job.thumbs.get(&job.picks[i])?.clone(), job.picture), cw, ch),
+                };
+                used.lock().unwrap().push((key, t.clone()));
                 Some(t)
             });
-            cache.1.extend(made.into_inner().unwrap());
+            cache = used.into_inner().unwrap().into_iter().collect();
             if job.generation != latest.load(Ordering::Relaxed) {
                 continue; // a newer one is waiting
             }
@@ -1379,18 +1202,27 @@ fn pairs(st: &State) -> Vec<(usize, CutSource)> {
 }
 
 /// The shots found in a master's picture as a one-track timeline in record frames (the master's timecode).
-/// The shots of detected `cuts`, only between `film` start and end (master timecode frames; None = no limit): a shot
-/// the start or end cuts through keeps its part inside.
-fn detected_timeline(master: &Path, cuts: &[i64], info: &frames::VideoInfo, film: (Option<i64>, Option<i64>)) -> Timeline {
-    let (lo, hi) = (film.0.unwrap_or(i64::MIN), film.1.unwrap_or(i64::MAX));
+/// The shots of detected `cuts` (first frame of every shot, then the frame count) at the master's timecode.
+fn detected_timeline(master: &Path, cuts: &[i64], info: &frames::VideoInfo) -> Timeline {
     let items = cuts
         .windows(2)
-        .map(|w| ((info.start_tc + w[0]).max(lo), (info.start_tc + w[1]).min(hi)))
-        .filter(|(a, b)| a < b)
         .enumerate()
-        .map(|(k, (start, end))| Item { name: format!("{} {}", tr(["Shot", "Shot", "Plan", "Plano"]), k + 1), start, end, key: 0 })
+        .map(|(k, w)| Item { name: format!("{} {}", tr(["Shot", "Shot", "Plan", "Plano"]), k + 1), start: info.start_tc + w[0], end: info.start_tc + w[1], key: 0 })
         .collect();
     Timeline { name: master.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), rate: info.rate, tracks: vec![Track { items }] }
+}
+
+/// Only the film between `from` and `to` (timecode frames; None = no limit): clips the start or end cuts through
+/// keep their part inside, the others go.
+fn within(mut t: Timeline, from: Option<i64>, to: Option<i64>) -> Timeline {
+    let (lo, hi) = (from.unwrap_or(i64::MIN), to.unwrap_or(i64::MAX));
+    for track in &mut t.tracks {
+        track.items.retain_mut(|it| {
+            (it.start, it.end) = (it.start.max(lo), it.end.min(hi));
+            it.start < it.end
+        });
+    }
+    t
 }
 
 /// The source line in master mode: shots, rate, tracks; one master: where it starts, several: how many.
@@ -1437,25 +1269,24 @@ fn load_source(app: &AppWindow) {
         }
         let mut shots = vec![];
         let mut first: Option<Timeline> = None;
-        // detected cuts: only the film between start and end (titles stay out); changing them needs no new analysis
+        // only the film between start and end (titles stay out), for cut lists and detected cuts alike; changing
+        // them needs no new analysis
         let (from, to) = (app.get_detect_from(), app.get_detect_to());
         for (i, source) in &pairs {
             let info = &st.masters[*i].1;
             let read = match source {
                 CutSource::List(list) => read_cut_list(list, info.rate).map_err(|e| format!("{}: {e}", file_name(list))),
-                CutSource::Detected(cuts) => {
-                    let tc = |s: &str| (!s.is_empty()).then(|| cinemosaic::timeline::parse_tc(s, info.rate, false)).flatten();
-                    let t = detected_timeline(&st.masters[*i].0, cuts, info, (tc(&from), tc(&to)));
-                    if t.tracks.iter().all(|k| k.items.is_empty()) {
-                        Err(tr(["{}: no picture between start and end (the master runs from {} to {})", "{}: kein Bild zwischen Beginn und Ende (der Master läuft von {} bis {})", "{} : aucune image entre début et fin (le master va de {} à {})", "{}: no hay imagen entre inicio y fin (el máster va de {} a {})"])
-                            .replacen("{}", &file_name(&st.masters[*i].0), 1)
-                            .replacen("{}", &format_tc(info.start_tc, info.rate), 1)
-                            .replacen("{}", &format_tc(info.start_tc + cuts.last().copied().unwrap_or(0), info.rate), 1))
-                    } else {
-                        Ok(t)
-                    }
-                }
+                CutSource::Detected(cuts) => Ok(detected_timeline(&st.masters[*i].0, cuts, info)),
             };
+            let tc = |s: &str| (!s.is_empty()).then(|| cinemosaic::timeline::parse_tc(s, info.rate, false)).flatten();
+            let read = read.map(|t| within(t, tc(&from), tc(&to))).and_then(|t| {
+                if t.tracks.iter().any(|k| !k.items.is_empty()) {
+                    return Ok(t);
+                }
+                Err(tr(["{}: no picture between start and end (the master starts at {})", "{}: kein Bild zwischen Beginn und Ende (der Master beginnt bei {})", "{} : aucune image entre début et fin (le master commence à {})", "{}: no hay imagen entre inicio y fin (el máster empieza en {})"])
+                    .replacen("{}", &file_name(&st.masters[*i].0), 1)
+                    .replacen("{}", &format_tc(info.start_tc, info.rate), 1))
+            });
             match read {
                 Ok(t) => {
                     shots.extend(t.shots().into_iter().map(|mut s| {
@@ -1637,140 +1468,9 @@ fn grab(app: &AppWindow) {
     });
 }
 
-/// A typed timecode: digits only, filled from the right like an Avid TC field ("1234" → "00:00:12:34"), leading
-/// zeros give way to new digits; all zero = empty (no limit). More than 8 digits: `before` stays.
-fn tc_typed(typed: &str, before: &str) -> String {
-    let digits: String = typed.chars().filter(char::is_ascii_digit).collect();
-    let d = digits.trim_start_matches('0');
-    match d.len() {
-        0 => String::new(),
-        9.. => before.to_string(),
-        _ => {
-            let d = format!("{d:0>8}");
-            format!("{}:{}:{}:{}", &d[0..2], &d[2..4], &d[4..6], &d[6..8])
-        }
-    }
-}
-
-/// A key in a timecode field: a digit is added at the right, Backspace / Delete takes the last digit off, anything
-/// else changes nothing.
-fn tc_key(text: &str, key: &str) -> String {
-    let digits: String = text.chars().filter(char::is_ascii_digit).collect();
-    match key {
-        "\u{8}" | "\u{7f}" => tc_typed(&digits[..digits.len().saturating_sub(1)], text),
-        k if k.len() == 1 && k.chars().all(|c| c.is_ascii_digit()) => tc_typed(&(digits + k), text),
-        _ => text.to_string(),
-    }
-}
-
-/// The four parts of a timecode field (hours, minutes, seconds, frames); empty = all zero.
-fn tc_parts(text: &str) -> [u32; 4] {
-    let mut p = [0; 4];
-    for (k, v) in text.split(':').filter_map(|v| v.parse().ok()).take(4).enumerate() {
-        p[k] = v;
-    }
-    p
-}
-
-fn tc_text(p: [u32; 4]) -> String {
-    if p == [0; 4] { String::new() } else { format!("{:02}:{:02}:{:02}:{:02}", p[0], p[1], p[2], p[3]) }
-}
-
-/// A key in a timecode field, as in the timecode fields of editing apps. `sel`: -1 nothing, 0–3 one part chosen
-/// (hours … frames), 4 everything chosen, 5 typing the whole timecode; `typed`: digits typed into the chosen part.
-/// A part: two digits replace it (one: "0d") and the next part is chosen, ↑ / ↓ count it up / down, ← / → and ":"
-/// choose the neighbour, Backspace sets it to 00. Everything (⌘A, double-click, Tab): a digit starts a new timecode
-/// filled from the right like in Avid, Backspace empties the field. `last_frame`: the highest frame number.
-fn tc_edit(st: TcState, key: &str, meta: bool, last_frame: u32) -> TcState {
-    let mut p = tc_parts(&st.text);
-    let max = [23, 59, 59, last_frame];
-    let (mut sel, mut typed) = (st.sel, 0);
-    let part = if (0..4).contains(&sel) { sel as usize } else { 3 };
-    let mut text = None;
-    match key {
-        "a" | "A" if meta => sel = 4,
-        _ if meta => return st,
-        "\u{f700}" | "\u{f701}" => {
-            let v = p[part] as i64 + if key == "\u{f700}" { 1 } else { -1 };
-            p[part] = v.rem_euclid(max[part] as i64 + 1) as u32;
-            sel = part as i32;
-        }
-        "\u{f702}" => sel = if sel >= 4 || sel < 0 { 0 } else { (sel - 1).max(0) },
-        "\u{f703}" | ":" | "." => sel = if sel >= 4 || sel < 0 { 3 } else { (sel + 1).min(3) },
-        "\u{8}" | "\u{7f}" => match sel {
-            4 => {
-                text = Some(String::new());
-                sel = 5;
-            }
-            0..=3 => p[part] = 0,
-            _ => text = Some(tc_key(&st.text, key)),
-        },
-        k if k.len() == 1 && k.as_bytes()[0].is_ascii_digit() => {
-            let d = k.parse::<u32>().unwrap_or(0);
-            match sel {
-                0..=3 if st.typed == 0 => {
-                    p[part] = d.min(max[part]);
-                    typed = 1;
-                }
-                0..=3 => {
-                    p[part] = ((p[part] % 10) * 10 + d).min(max[part]);
-                    sel = (sel + 1).min(3);
-                }
-                4 => {
-                    text = Some(tc_typed(k, ""));
-                    sel = 5;
-                }
-                _ => {
-                    text = Some(tc_key(&st.text, k));
-                    sel = 5;
-                }
-            }
-        }
-        _ => return st,
-    }
-    TcState { text: text.unwrap_or_else(|| tc_text(p)).into(), sel, typed }
-}
-
 /// The highest frame number of a timecode in the first master (24 without one).
 fn last_frame(app: &AppWindow) -> u32 {
     with_state(app, |st| st.borrow().masters.first().map_or(25, |m| m.1.rate.nominal()) as u32 - 1)
-}
-
-/// Text on the clipboard (macOS).
-fn clipboard_text() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    unsafe {
-        use objc2::runtime::AnyObject;
-        use objc2::{class, msg_send};
-        let board: *mut AnyObject = msg_send![class!(NSPasteboard), generalPasteboard];
-        let kind = std::ffi::CString::new("public.utf8-plain-text").ok()?;
-        let kind: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: kind.as_ptr()];
-        let s: *mut AnyObject = msg_send![board, stringForType: kind];
-        if s.is_null() {
-            return None;
-        }
-        let c: *const std::ffi::c_char = msg_send![s, UTF8String];
-        return (!c.is_null()).then(|| std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned());
-    }
-    #[allow(unreachable_code)]
-    None
-}
-
-/// ⌘V in a timecode field: "01:02:03:04", "01020304" or "1:2:3:4" from the clipboard; anything else changes nothing.
-fn tc_pasted(st: TcState, clip: &str, last_frame: u32) -> TcState {
-    let clip = clip.trim();
-    let parts: Vec<&str> = clip.split([':', ';', '.']).collect();
-    let p: Option<Vec<u32>> = if parts.len() == 4 {
-        parts.iter().map(|v| v.parse().ok()).collect()
-    } else if (1..=8).contains(&clip.len()) && clip.bytes().all(|b| b.is_ascii_digit()) {
-        Some(tc_parts(&tc_typed(clip, "")).to_vec())
-    } else {
-        None
-    };
-    match p {
-        Some(p) if p[0] <= 23 && p[1] <= 59 && p[2] <= 59 && p[3] <= last_frame => TcState { text: tc_text([p[0], p[1], p[2], p[3]]).into(), sel: 4, typed: 0 },
-        _ => st,
-    }
 }
 
 /// Finds the cuts of every master that has neither a cut list nor detected cuts (in a thread; pause and cancel work).
@@ -1819,7 +1519,7 @@ fn detect_cuts(app: &AppWindow) {
                     }
                 });
             };
-            match frames::detect_cuts(path, info.rate, 0, None, &|| gate.go(), &progress) {
+            match frames::detect_cuts(path, info.rate, &|| gate.go(), &progress) {
                 Ok(Some(cuts)) if cuts.len() > 1 => found.push((path.clone(), cuts)),
                 Ok(Some(_)) => errors.push(format!("{}: {}", file_name(path), tr(["no picture found", "kein Bild gefunden", "aucune image trouvée", "no se encontró imagen"]))),
                 Ok(None) => break,
@@ -2143,7 +1843,6 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             lists: st.lists.clone(),
             detected: st.detected.clone(),
             bin: st.bin.clone(),
-            sequence: 0,
             chosen: (!st.seq_on.iter().all(|&on| on)).then(|| st.sequence_names.iter().zip(&st.seq_on).filter(|(_, on)| **on).map(|(n, _)| n.clone()).collect()),
             volumes_off: st.volumes.iter().filter(|v| !v.1).map(|v| v.0.clone()).collect(),
             look: preset_json(app),
@@ -2262,15 +1961,8 @@ fn open_project(app: &AppWindow, path: PathBuf) {
             show_files(&app);
             let gone: Vec<String> = probed.iter().filter(|(_, i)| i.is_err()).map(|(m, _)| file_name(m)).collect();
             if let Some(names) = &names {
-                // the sequences chosen by name (older projects: one index, 0 = all)
-                let on: Vec<bool> = names
-                    .iter()
-                    .enumerate()
-                    .map(|(i, n)| match &p.chosen {
-                        Some(list) => list.contains(n),
-                        None => p.sequence <= 0 || p.sequence as usize == i + 1,
-                    })
-                    .collect();
+                // the sequences chosen by name (None = all)
+                let on: Vec<bool> = names.iter().map(|n| p.chosen.as_ref().is_none_or(|list| list.contains(n))).collect();
                 with_state(&app, |st| {
                     let mut st = st.borrow_mut();
                     st.sequence_names = names.clone();
@@ -2640,8 +2332,8 @@ fn wire_shared(app: &AppWindow, ctx: &Rc<Ctx>) {
     });
 }
 
-/// Source, grabbing, sheet, presets, export and the File menu of one project window.
-fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
+/// Source tab: master files, cut lists, cut detection and its film range, bin, sequences, volumes; grabbing.
+fn wire_source(app: &AppWindow) {
     // master files and cut lists are added (several at a time); the × removes one
     app.on_pick_master({
         let weak = app.as_weak();
@@ -2685,7 +2377,6 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             load_source(&app);
         }
     });
-    // masters without a cut list: the cuts are looked for in the picture, one master after the other (whole files)
     app.on_tc_edit({
         let weak = app.as_weak();
         move |st, key, meta| match weak.upgrade() {
@@ -2709,11 +2400,12 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move || {
             let Some(app) = weak.upgrade() else { return };
-            if app.get_mode() == 0 && with_state(&app, |st| !st.borrow().detected.is_empty()) {
+            if app.get_mode() == 0 && with_state(&app, |st| !st.borrow().masters.is_empty()) {
                 load_source(&app);
             }
         }
     });
+    // masters without a cut list: the cuts are looked for in the picture, one master after the other (whole files)
     app.on_detect_cuts({
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(detect_cuts)
@@ -2849,7 +2541,10 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             with_state(&app, |st| st.borrow().gate.cancel.store(true, Ordering::Relaxed));
         }
     });
-    // headline anchor: a sensible move for the new point (inside the sheet), then draw
+}
+
+/// Sheet tab and preview: picture format, paper, unit, size, zoom, redraw; export and Show in Finder.
+fn wire_sheet(app: &AppWindow) {
     app.on_picture_chosen({
         let weak = app.as_weak();
         move |i| {
@@ -2901,6 +2596,36 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(size_edited)
     });
+    // zoom: draw a sharper preview once the zoom has rested for a moment
+    let zoom_timer = Rc::new(slint::Timer::default());
+    app.on_zoom_changed({
+        let (weak, timer) = (app.as_weak(), zoom_timer.clone());
+        move |_| {
+            let weak = weak.clone();
+            timer.start(slint::TimerMode::SingleShot, Duration::from_millis(180), move || weak.upgrade().iter().for_each(refresh));
+        }
+    });
+    app.on_sheet_changed({
+        let weak = app.as_weak();
+        move || weak.upgrade().iter().for_each(refresh)
+    });
+    app.on_export({
+        let weak = app.as_weak();
+        move || weak.upgrade().iter().for_each(save)
+    });
+    app.on_reveal({
+        let weak = app.as_weak();
+        move || {
+        let Some(app) = weak.upgrade() else { return };
+        if let Some(p) = with_state(&app, |st| st.borrow().saved.clone()) {
+            let _ = std::process::Command::new("open").arg("-R").arg(p).spawn();
+        }
+        }
+    });
+}
+
+/// Frame line and Headline tabs: colour presets and the colour panel, anchor, font list.
+fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
     // a colour preset clicked: its colour
     app.on_color_swatch({
         let weak = app.as_weak();
@@ -2925,18 +2650,19 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         move |k| {
             let Some(app) = weak.upgrade() else { return };
             let value = if k == 0 { app.get_line_color() } else { app.get_head_color() };
-            let (weak, ctx) = (weak.clone(), ctx.clone());
+            let (weak, ctx, saver) = (weak.clone(), ctx.clone(), ctx.clone());
             color_panel::open(
                 hex_color(&value).unwrap_or([0, 0, 0]),
                 Rc::new(move |c| {
                     let Some(app) = weak.upgrade() else { return };
                     let slot = if k == 0 { app.get_line_slot() } else { app.get_head_slot() };
                     if let Ok(slot) = usize::try_from(slot) {
-                        set_palette_entry(&ctx.settings, k as usize, slot, c);
+                        set_palette_entry(&ctx.settings, k as usize, slot, c, false);
                     }
                     if k == 0 { app.set_line_color(hex_text(c).into()) } else { app.set_head_color(hex_text(c).into()) }
                     refresh(&app);
                 }),
+                Rc::new(move || save_settings(&saver.settings.borrow())),
             );
         }
     });
@@ -2947,10 +2673,11 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             let Some(app) = weak.upgrade() else { return };
             let (value, slot) = if k == 0 { (app.get_line_color(), app.get_line_slot()) } else { (app.get_head_color(), app.get_head_slot()) };
             if let (Some(c), Ok(slot)) = (hex_color(&value), usize::try_from(slot)) {
-                set_palette_entry(&ctx.settings, k as usize, slot, c);
+                set_palette_entry(&ctx.settings, k as usize, slot, c, true);
             }
         }
     });
+    // headline anchor: a sensible move for the new point (inside the sheet), then draw
     app.on_anchor_chosen({
         let weak = app.as_weak();
         move |i| {
@@ -2975,23 +2702,10 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             })
         }
     });
-    // zoom: draw a sharper preview once the zoom has rested for a moment
-    let zoom_timer = Rc::new(slint::Timer::default());
-    app.on_zoom_changed({
-        let (weak, timer) = (app.as_weak(), zoom_timer.clone());
-        move |_| {
-            let weak = weak.clone();
-            timer.start(slint::TimerMode::SingleShot, Duration::from_millis(180), move || weak.upgrade().iter().for_each(refresh));
-        }
-    });
-    app.on_sheet_changed({
-        let weak = app.as_weak();
-        move || weak.upgrade().iter().for_each(refresh)
-    });
-    app.on_export({
-        let weak = app.as_weak();
-        move || weak.upgrade().iter().for_each(save)
-    });
+}
+
+/// Presets: choose, new, update, rename, delete.
+fn wire_presets(app: &AppWindow) {
     app.on_preset_chosen({
         let weak = app.as_weak();
         move |i| {
@@ -3069,16 +2783,14 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
             store_presets(&app, String::new());
         }
     });
-    app.on_reveal({
-        let weak = app.as_weak();
-        move || {
-        let Some(app) = weak.upgrade() else { return };
-        if let Some(p) = with_state(&app, |st| st.borrow().saved.clone()) {
-            let _ = std::process::Command::new("open").arg("-R").arg(p).spawn();
-        }
-        }
-    });
+}
 
+/// One project window: its tabs, presets and the File menu.
+fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
+    wire_source(app);
+    wire_sheet(app);
+    wire_design(app, ctx);
+    wire_presets(app);
     // File menu: run after the click (dialogs during macOS menu handling are asking for trouble, see above)
     let shared = app.global::<Shared>();
     let later = |f: Rc<dyn Fn(&AppWindow)>, weak: slint::Weak<AppWindow>| {
@@ -3168,466 +2880,17 @@ fn load_texts_again(app: &AppWindow) {
     refresh(app);
 }
 
-/// The macOS colour panel: opened with a colour, it reports every colour picked (polled; it has no Slint target)
-/// until it is closed or opened for another preset.
-mod color_panel {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    type OnPick = Rc<dyn Fn([u8; 3])>;
-
-    thread_local! {
-        static TARGET: RefCell<Option<(OnPick, [u8; 3])>> = const { RefCell::new(None) };
-        static TIMER: slint::Timer = slint::Timer::default();
-    }
-
-    #[cfg(target_os = "macos")]
-    pub fn open(c: [u8; 3], on_pick: OnPick) {
-        use objc2::runtime::AnyObject;
-        use objc2::{class, msg_send};
-        unsafe {
-            let panel: *mut AnyObject = msg_send![class!(NSColorPanel), sharedColorPanel];
-            let _: () = msg_send![panel, setShowsAlpha: false];
-            let [r, g, b] = c.map(|v| v as f64 / 255.0);
-            let color: *mut AnyObject = msg_send![class!(NSColor), colorWithSRGBRed: r, green: g, blue: b, alpha: 1.0f64];
-            let _: () = msg_send![panel, setColor: color];
-            let _: () = msg_send![panel, orderFront: std::ptr::null_mut::<AnyObject>()];
-        }
-        TARGET.with(|t| *t.borrow_mut() = Some((on_pick, c)));
-        TIMER.with(|t| t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(80), poll));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub fn open(_: [u8; 3], _: OnPick) {}
-
-    #[cfg(target_os = "macos")]
-    fn poll() {
-        use objc2::runtime::AnyObject;
-        use objc2::{class, msg_send};
-        let picked = unsafe {
-            let panel: *mut AnyObject = msg_send![class!(NSColorPanel), sharedColorPanel];
-            let visible: bool = msg_send![panel, isVisible];
-            if !visible {
-                TIMER.with(|t| t.stop());
-                TARGET.with(|t| *t.borrow_mut() = None);
-                return;
-            }
-            let color: *mut AnyObject = msg_send![panel, color];
-            let space: *mut AnyObject = msg_send![class!(NSColorSpace), sRGBColorSpace];
-            let srgb: *mut AnyObject = msg_send![color, colorUsingColorSpace: space];
-            if srgb.is_null() {
-                return;
-            }
-            let (r, g, b): (f64, f64, f64) = (msg_send![srgb, redComponent], msg_send![srgb, greenComponent], msg_send![srgb, blueComponent]);
-            [r, g, b].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-        };
-        let call = TARGET.with(|t| {
-            let mut t = t.borrow_mut();
-            let (f, last) = t.as_mut()?;
-            (*last != picked).then(|| {
-                *last = picked;
-                f.clone()
-            })
-        });
-        if let Some(f) = call {
-            f(picked);
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    fn poll() {}
-}
-
-#[cfg(target_os = "macos")]
-mod mac_menu {
-    use objc2::rc::Retained;
-    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-    use objc2::{class, msg_send, sel};
-    use std::cell::RefCell;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    type Handler = RefCell<Option<Box<dyn Fn()>>>;
-    thread_local! {
-        static ABOUT: Handler = RefCell::new(None);
-        static SETTINGS: Handler = RefCell::new(None);
-        static TITLE: RefCell<String> = RefCell::new("Settings…".into());
-    }
-    static ORIGINAL_SET_MAIN_MENU: AtomicUsize = AtomicUsize::new(0);
-    type ObjFn = extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject);
-
-    extern "C-unwind" fn about(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
-        ABOUT.with(|h| h.borrow().iter().for_each(|f| f()));
-    }
-
-    extern "C-unwind" fn settings(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
-        SETTINGS.with(|h| h.borrow().iter().for_each(|f| f()));
-    }
-
-    extern "C-unwind" fn set_main_menu(app: *mut AnyObject, sel: Sel, menu: *mut AnyObject) {
-        let original = ORIGINAL_SET_MAIN_MENU.load(Ordering::Relaxed);
-        if original != 0 {
-            let original: ObjFn = unsafe { std::mem::transmute(original) };
-            original(app, sel, menu);
-        }
-        ensure();
-    }
-
-    fn ns_string(s: &str) -> Retained<AnyObject> {
-        let c = std::ffi::CString::new(s).unwrap_or_default();
-        unsafe { msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()] }
-    }
-
-    /// Adds "Settings…" to the app menu if it is missing and keeps its title in the current language.
-    pub fn ensure() {
-        unsafe {
-            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-            let main: *mut AnyObject = msg_send![app, mainMenu];
-            if main.is_null() {
-                return;
-            }
-            let count: isize = msg_send![main, numberOfItems];
-            if count == 0 {
-                return;
-            }
-            let first: *mut AnyObject = msg_send![main, itemAtIndex: 0isize];
-            let app_menu: *mut AnyObject = msg_send![first, submenu];
-            if app_menu.is_null() {
-                return;
-            }
-            let title = TITLE.with(|t| ns_string(&t.borrow()));
-            let index: isize = msg_send![app_menu, indexOfItemWithTarget: std::ptr::null_mut::<AnyObject>(), andAction: sel!(ssShowSettings:)];
-            if index >= 0 {
-                let item: *mut AnyObject = msg_send![app_menu, itemAtIndex: index];
-                let _: () = msg_send![item, setTitle: &*title];
-                return;
-            }
-            // only into the app menu Slint builds (About, separator, …); macOS sets its own short menu at launch,
-            // and inserting past its end throws an Objective-C exception that aborts the app
-            let items: isize = msg_send![app_menu, numberOfItems];
-            if items < 3 {
-                return;
-            }
-            let second: *mut AnyObject = msg_send![app_menu, itemAtIndex: 1isize];
-            let separator_at_1: bool = msg_send![second, isSeparatorItem];
-            if !separator_at_1 {
-                return;
-            }
-            let item: Retained<AnyObject> = msg_send![class!(NSMenuItem), new];
-            let _: () = msg_send![&*item, setTitle: &*title];
-            let _: () = msg_send![&*item, setAction: sel!(ssShowSettings:)];
-            let _: () = msg_send![&*item, setKeyEquivalent: &*ns_string(",")];
-            let separator: Retained<AnyObject> = msg_send![class!(NSMenuItem), separatorItem];
-            // About, separator, here: Settings…, separator, Services …
-            let _: () = msg_send![app_menu, insertItem: &*item, atIndex: 2isize];
-            let _: () = msg_send![app_menu, insertItem: &*separator, atIndex: 3isize];
-        }
-    }
-
-    pub fn set_settings_title(title: &str) {
-        TITLE.with(|t| *t.borrow_mut() = title.to_string());
-        ensure();
-    }
-
-    pub fn install(on_about: Box<dyn Fn()>, on_settings: Box<dyn Fn()>, settings_title: &str) {
-        ABOUT.with(|h| *h.borrow_mut() = Some(on_about));
-        SETTINGS.with(|h| *h.borrow_mut() = Some(on_settings));
-        TITLE.with(|t| *t.borrow_mut() = settings_title.to_string());
-        let Some(cls) = AnyClass::get(c"NSApplication") else { return };
-        let imp = |f: ObjFn| unsafe { std::mem::transmute::<ObjFn, Imp>(f) };
-        for sel in [sel!(orderFrontStandardAboutPanel:), sel!(orderFrontStandardAboutPanelWithOptions:)] {
-            if let Some(m) = cls.instance_method(sel) {
-                // same signature (self, _cmd, one object) as the methods it replaces
-                unsafe { m.set_implementation(imp(about)) };
-            }
-        }
-        // the menu item's action; with no target it reaches NSApplication through the responder chain
-        unsafe { objc2::ffi::class_addMethod(cls as *const AnyClass as *mut AnyClass, sel!(ssShowSettings:), imp(settings), c"v@:@".as_ptr()) };
-        if let Some(m) = cls.instance_method(sel!(setMainMenu:)) {
-            let original = unsafe { m.set_implementation(imp(set_main_menu)) };
-            ORIGINAL_SET_MAIN_MENU.store(original as usize, Ordering::Relaxed);
-        }
-        ensure();
-    }
-}
-
-/// Project files from the Finder (double-click, drop on the Dock icon) and Quit asking about unsaved work: two
-/// methods added to winit's application delegate class (winit registers it but offers neither).
-#[cfg(target_os = "macos")]
-mod mac_app {
-    use objc2::msg_send;
-    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-    use objc2::sel;
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-
-    type Open = RefCell<Option<Box<dyn Fn(PathBuf)>>>;
-    type Quit = RefCell<Option<Box<dyn Fn() -> bool>>>;
-    thread_local! {
-        static OPEN: Open = RefCell::new(None);
-        static QUIT: Quit = RefCell::new(None);
-    }
-
-    extern "C-unwind" fn open_urls(_: *mut AnyObject, _: Sel, _: *mut AnyObject, urls: *mut AnyObject) {
-        let count: usize = unsafe { msg_send![urls, count] };
-        for i in 0..count {
-            let path: *mut AnyObject = unsafe {
-                let url: *mut AnyObject = msg_send![urls, objectAtIndex: i];
-                msg_send![url, path]
-            };
-            if path.is_null() {
-                continue;
-            }
-            let c: *const std::ffi::c_char = unsafe { msg_send![path, UTF8String] };
-            if c.is_null() {
-                continue;
-            }
-            let p = PathBuf::from(unsafe { std::ffi::CStr::from_ptr(c) }.to_string_lossy().into_owned());
-            OPEN.with(|h| h.borrow().iter().for_each(|f| f(p.clone())));
-        }
-    }
-
-    /// NSTerminateNow (1) or NSTerminateCancel (0)
-    extern "C-unwind" fn should_terminate(_: *mut AnyObject, _: Sel, _: *mut AnyObject) -> usize {
-        QUIT.with(|h| h.borrow().as_ref().is_none_or(|f| f())) as usize
-    }
-
-    pub fn install(open: Box<dyn Fn(PathBuf)>, quit: Box<dyn Fn() -> bool>) {
-        OPEN.with(|h| *h.borrow_mut() = Some(open));
-        QUIT.with(|h| *h.borrow_mut() = Some(quit));
-        let Some(cls) = AnyClass::get(c"WinitApplicationDelegate") else {
-            crate::log::write("no WinitApplicationDelegate: projects cannot be opened from the Finder");
-            return;
-        };
-        type OpenFn = extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject);
-        type QuitFn = extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize;
-        let cls = cls as *const AnyClass as *mut AnyClass;
-        unsafe {
-            objc2::ffi::class_addMethod(cls, sel!(application:openURLs:), std::mem::transmute::<OpenFn, Imp>(open_urls), c"v@:@@".as_ptr());
-            objc2::ffi::class_addMethod(cls, sel!(applicationShouldTerminate:), std::mem::transmute::<QuitFn, Imp>(should_terminate), c"Q@:@".as_ptr());
-        }
-    }
-}
-
-/// AppKit details Slint does not offer: colours in sRGB like the Swift apps, and the settings window's title bar.
-#[cfg(target_os = "macos")]
-mod mac_window {
-    use objc2::encode::{Encode, Encoding};
-    use objc2::runtime::{AnyObject, Imp, Sel};
-    use objc2::{class, msg_send, sel};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Size {
-        width: f64,
-        height: f64,
-    }
-    unsafe impl Encode for Size {
-        const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
-    }
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Rect {
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-    }
-
-    unsafe impl Encode for Rect {
-        const ENCODING: Encoding = Encoding::Struct("CGRect", &[Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]), Size::ENCODING]);
-    }
-
-    type Init = extern "C-unwind" fn(*mut AnyObject, Sel, Rect, usize, usize, bool) -> *mut AnyObject;
-    static ORIGINAL_INIT: AtomicUsize = AtomicUsize::new(0);
-
-    extern "C-unwind" fn init_srgb(this: *mut AnyObject, sel: Sel, rect: Rect, style: usize, backing: usize, defer: bool) -> *mut AnyObject {
-        let original: Init = unsafe { std::mem::transmute(ORIGINAL_INIT.load(Ordering::Relaxed)) };
-        let win = original(this, sel, rect, style, backing, defer);
-        if !win.is_null() {
-            unsafe {
-                let srgb: *mut AnyObject = msg_send![class!(NSColorSpace), sRGBColorSpace];
-                let _: () = msg_send![win, setColorSpace: srgb];
-            }
-        }
-        win
-    }
-
-    /// Slint (femtovg, OpenGL) draws without colour management, so #1f2225 came out as #21262a next to Mountpoint's
-    /// exact #1f2225. A window tagged as sRGB before its first frame shows the Theme colours exactly like the SwiftUI
-    /// apps; set later it only worked now and then – so every NSWindow gets sRGB right in its initializer.
-    /// Call once, before the first window is created.
-    pub fn srgb_windows() {
-        let cls = class!(NSWindow);
-        if let Some(m) = cls.instance_method(sel!(initWithContentRect:styleMask:backing:defer:)) {
-            let imp: Imp = unsafe { std::mem::transmute(init_srgb as Init) };
-            let original = unsafe { m.set_implementation(imp) };
-            ORIGINAL_INIT.store(original as usize, Ordering::Relaxed);
-        }
-    }
-
-    type KeyFn = extern "C-unwind" fn(*mut AnyObject, Sel);
-    static ORIGINAL_BECOME_KEY: AtomicUsize = AtomicUsize::new(0);
-    static ORIGINAL_RESIGN_KEY: AtomicUsize = AtomicUsize::new(0);
-    thread_local! {
-        static KEY_CHANGED: std::cell::RefCell<Option<Box<dyn Fn()>>> = std::cell::RefCell::new(None);
-    }
-
-    fn key_changed(original: &AtomicUsize, this: *mut AnyObject, sel: Sel) {
-        let original: KeyFn = unsafe { std::mem::transmute(original.load(Ordering::Relaxed)) };
-        original(this, sel);
-        KEY_CHANGED.with(|f| f.borrow().iter().for_each(|f| f()));
-    }
-    extern "C-unwind" fn become_key(this: *mut AnyObject, sel: Sel) {
-        key_changed(&ORIGINAL_BECOME_KEY, this, sel);
-    }
-    extern "C-unwind" fn resign_key(this: *mut AnyObject, sel: Sel) {
-        key_changed(&ORIGINAL_RESIGN_KEY, this, sel);
-    }
-
-    /// Calls `f` whenever any window becomes or stops being the key window – the tab bar then changes colour at once
-    /// together with the title bar (polling made it lag behind).
-    pub fn on_key_change(f: Box<dyn Fn()>) {
-        KEY_CHANGED.with(|k| *k.borrow_mut() = Some(f));
-        let cls = class!(NSWindow);
-        for (name, imp, original) in [
-            (sel!(becomeKeyWindow), become_key as KeyFn, &ORIGINAL_BECOME_KEY),
-            (sel!(resignKeyWindow), resign_key as KeyFn, &ORIGINAL_RESIGN_KEY),
-        ] {
-            if original.load(Ordering::Relaxed) != 0 {
-                continue;
-            }
-            if let Some(m) = cls.instance_method(name) {
-                let imp: Imp = unsafe { std::mem::transmute(imp) };
-                original.store(unsafe { m.set_implementation(imp) } as usize, Ordering::Relaxed);
-            }
-        }
-    }
-
-    fn ns_window(w: &slint::Window) -> Option<*mut AnyObject> {
-        let handle = w.window_handle();
-        let RawWindowHandle::AppKit(h) = handle.window_handle().ok()?.as_raw() else { return None };
-        let view = h.ns_view.as_ptr() as *mut AnyObject;
-        let win: *mut AnyObject = unsafe { msg_send![view, window] };
-        (!win.is_null()).then_some(win)
-    }
-
-    /// Content up to the top edge under a transparent title bar (like an NSToolbar window), so the tab bar and the
-    /// title bar are one surface without the separator line. Keeps the content size (`height` = whole window).
-    pub fn unify_titlebar(w: &slint::Window, width: f64, height: f64) {
-        let Some(win) = ns_window(w) else { return };
-        unsafe {
-            let mask: usize = msg_send![win, styleMask];
-            const FULL_SIZE_CONTENT_VIEW: usize = 1 << 15;
-            const MINIATURIZABLE: usize = 1 << 2;
-            if mask & FULL_SIZE_CONTENT_VIEW == 0 {
-                // HIG settings: minimize and zoom dimmed (zoom already is: the size is fixed)
-                let _: () = msg_send![win, setStyleMask: (mask | FULL_SIZE_CONTENT_VIEW) & !MINIATURIZABLE];
-                let _: () = msg_send![win, setTitlebarAppearsTransparent: true];
-                let _: () = msg_send![win, setContentSize: Size { width, height }];
-            }
-        }
-    }
-
-    /// Usable size of the main screen (without menu bar and Dock), in points; (0, 0) if unknown.
-    pub fn screen_size() -> (f64, f64) {
-        unsafe {
-            let screen: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
-            if screen.is_null() {
-                return (0.0, 0.0);
-            }
-            let frame: Rect = msg_send![screen, visibleFrame];
-            (frame.width, frame.height)
-        }
-    }
-
-    /// Smallest size the user can drag the window to (content size in points); returns the value AppKit now holds.
-    pub fn set_min_size(w: &slint::Window, width: f64, height: f64) -> Option<(f64, f64)> {
-        let win = ns_window(w)?;
-        unsafe {
-            let _: () = msg_send![win, setContentMinSize: Size { width, height }];
-            let got: Size = msg_send![win, contentMinSize];
-            Some((got.width, got.height))
-        }
-    }
-
-    /// Title bar, traffic lights and title text in the app's own light/dark (not the system's): every window.
-    pub fn appearance_all(dark: bool) {
-        let name: &std::ffi::CStr = if dark { c"NSAppearanceNameDarkAqua" } else { c"NSAppearanceNameAqua" };
-        unsafe {
-            let name: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: name.as_ptr()];
-            let wanted: *mut AnyObject = msg_send![class!(NSAppearance), appearanceNamed: name];
-            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-            let windows: *mut AnyObject = msg_send![app, windows];
-            let count: usize = msg_send![windows, count];
-            for i in 0..count {
-                let w: *mut AnyObject = msg_send![windows, objectAtIndex: i];
-                let current: *mut AnyObject = msg_send![w, appearance];
-                if current != wanted {
-                    let _: () = msg_send![w, setAppearance: wanted];
-                }
-            }
-        }
-    }
-
-    /// Whether the window is the key window (the title bar is lighter then; the tab bar follows).
-    pub fn is_key(w: &slint::Window) -> bool {
-        ns_window(w).is_some_and(|win| unsafe { msg_send![win, isKeyWindow] })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
-    fn timecode_fields_fill_from_the_right() {
-        use super::tc_typed;
-        assert_eq!(tc_typed("1", ""), "00:00:00:01");
-        assert_eq!(tc_typed("00:00:00:012", "00:00:00:01"), "00:00:00:12");
-        assert_eq!(tc_typed("01:00:00:00", ""), "01:00:00:00");
-        assert_eq!(tc_typed("01:00:00:000", "01:00:00:00"), "10:00:00:00"); // a leading zero gives way
-        assert_eq!(tc_typed("10:00:00:000", "10:00:00:00"), "10:00:00:00"); // a 9th digit is refused
-        assert_eq!(tc_typed("00:00:00:1", "00:00:00:12"), "00:00:00:01"); // backspace shifts right
-        assert_eq!(tc_typed("00:00:00:0", "00:00:00:01"), "");
-        assert_eq!(tc_typed("1a:b2", ""), "00:00:00:12");
-        let typed = ["1", "a", "0", ":", "0", "1", "3", "0", "0", "0", "5"].iter().fold(String::new(), |t, k| super::tc_key(&t, k));
-        assert_eq!(typed, "10:01:30:00"); // the 9th digit (5) is refused
-        assert_eq!(super::tc_key("10:01:30:00", "\u{8}"), "01:00:13:00");
-        assert_eq!(super::tc_key("00:00:00:07", "\u{7f}"), "");
-    }
-
-    #[test]
-    fn timecode_parts_are_chosen_and_typed_like_in_editing_apps() {
-        use super::{TcState, tc_edit, tc_pasted};
-        let st = |t: &str, sel: i32, typed: i32| TcState { text: t.into(), sel, typed };
-        let keys = |mut s: TcState, ks: &[&str]| {
-            for k in ks {
-                s = tc_edit(s, k, false, 24);
-            }
-            (s.text.to_string(), s.sel, s.typed)
-        };
-        // hours chosen: two digits replace them, the minutes come next
-        assert_eq!(keys(st("10:20:30:12", 0, 0), &["0", "1"]), ("01:20:30:12".into(), 1, 0));
-        assert_eq!(keys(st("10:20:30:12", 0, 0), &["7"]), ("07:20:30:12".into(), 0, 1));
-        // too large: the highest the part allows
-        assert_eq!(keys(st("", 1, 0), &["9", "9"]), ("00:59:00:00".into(), 2, 0));
-        assert_eq!(keys(st("", 3, 0), &["3", "0"]), ("00:00:00:24".into(), 3, 0));
-        // up / down count the chosen part round; left / right choose
-        assert_eq!(keys(st("00:59:00:00", 1, 0), &["\u{f700}"]), ("".into(), 1, 0));
-        assert_eq!(keys(st("", 3, 0), &["\u{f701}"]), ("00:00:00:24".into(), 3, 0));
-        assert_eq!(keys(st("01:00:00:00", 2, 0), &["\u{f702}", "\u{f702}", "\u{f702}"]).1, 0);
-        // Backspace: the part to 00; everything chosen: empty, then typed from the right
-        assert_eq!(keys(st("01:02:03:04", 1, 0), &["\u{8}"]).0, "01:00:03:04");
-        assert_eq!(keys(st("01:02:03:04", 4, 0), &["\u{8}"]), ("".into(), 5, 0));
-        assert_eq!(keys(st("01:02:03:04", 4, 0), &["1", "2", "3"]), ("00:00:01:23".into(), 5, 0));
-        assert_eq!(tc_edit(st("01:02:03:04", 1, 0), "a", true, 24).sel, 4);
-        assert_eq!(tc_edit(st("01:02:03:04", 1, 0), "x", false, 24).text, "01:02:03:04");
-        // paste
-        assert_eq!(tc_pasted(st("", 1, 0), " 01:00:10:00\n", 24).text, "01:00:10:00");
-        assert_eq!(tc_pasted(st("", 1, 0), "1001000", 24).text, "01:00:10:00");
-        assert_eq!(tc_pasted(st("09:00:00:00", 1, 0), "hello", 24).text, "09:00:00:00");
-        assert_eq!(tc_pasted(st("", 1, 0), "01:00:10:30", 24).text, ""); // frame 30 at 25 fps
+    fn film_start_and_end_cut_the_clips() {
+        use super::{Item, Rate, Timeline, Track, within};
+        let it = |start, end| Item { name: String::new(), start, end, key: 0 };
+        let t = Timeline { name: String::new(), rate: Rate { num: 25, den: 1 }, tracks: vec![Track { items: vec![it(0, 100), it(100, 200), it(200, 300)] }] };
+        let cut = within(t.clone(), Some(150), Some(250));
+        assert_eq!(cut.tracks[0].items.iter().map(|i| (i.start, i.end)).collect::<Vec<_>>(), vec![(150, 200), (200, 250)]);
+        assert_eq!(within(t.clone(), None, None).tracks[0].items.len(), 3);
+        assert!(within(t, Some(400), None).tracks[0].items.is_empty());
     }
 
     #[test]

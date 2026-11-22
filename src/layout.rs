@@ -379,7 +379,7 @@ pub fn crop(img: &RgbImage, aspect: f64) -> RgbImage {
 
 /// The still scaled to cover the whole cell, the overhang cut off around the centre – no white edges, whatever
 /// the rounding or a slightly different aspect.
-fn cover(img: &RgbImage, cw: u32, ch: u32) -> RgbImage {
+pub fn cover(img: &RgbImage, cw: u32, ch: u32) -> RgbImage {
     let s = (cw as f64 / img.width() as f64).max(ch as f64 / img.height() as f64);
     let (iw, ih) = (((img.width() as f64 * s).ceil() as u32).max(cw), ((img.height() as f64 * s).ceil() as u32).max(ch));
     let big = imageops::resize(img, iw, ih, imageops::FilterType::CatmullRom);
@@ -476,11 +476,6 @@ pub fn render_tiles(sheet: &Sheet, n: usize, aspect: f64, tile: impl Fn(usize, u
     });
     let mut tiles = tiles.into_iter();
     compose(sheet, n, &grid, |_, _, _| tiles.next().flatten())
-}
-
-/// The still `img` filling a cell of `cw` × `ch` (cut to it, centred).
-pub fn cover_cell(img: &RgbImage, cw: u32, ch: u32) -> RgbImage {
-    cover(img, cw, ch)
 }
 
 fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32, u32) -> Option<RgbImage>) -> RgbImage {
