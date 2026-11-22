@@ -419,14 +419,39 @@ component NumberField inherits Rectangle {
     }
 }
 
-// A timecode field: digits only, filled from the right like an Avid TC field ("1234" → 00:00:12:34), at most 8,
-// Backspace takes the last one off; empty shows 00:00:00:00 in the disabled grey. The keys go to Rust
-// (`key(text, key)` gives the new text), so there is no cursor to jump about.
+// A timecode field like in editing apps: a click chooses hours, minutes, seconds or frames (highlighted), two digits
+// replace that part and the next one is chosen, ↑ / ↓ count it, ← / → choose the neighbour. Double-click, ⌘A or Tab
+// choose everything: digits then fill from the right like in Avid ("1234" → 00:00:12:34), Backspace empties the field.
+// ⌘V pastes a timecode. Empty shows 00:00:00:00 in grey (= no limit). The keys go to Rust (`edit`).
+export struct TcState {
+    text: string,
+    // -1 nothing, 0–3 one part, 4 everything, 5 typing the whole timecode
+    sel: int,
+    // digits typed into the chosen part
+    typed: int,
+}
+
 component TcField inherits Rectangle {
     in-out property <string> text;
     in property <string> label;
-    pure callback key(string, string) -> string;
-    width: 104px;
+    pure callback edit(TcState, string, bool) -> TcState;
+    callback paste(TcState) -> TcState;
+    pure callback parts(string) -> [string];
+    // focus left: the value is final
+    callback done();
+    property <int> sel: -1;
+    property <int> typed;
+    function apply(r: TcState) {
+        root.text = r.text;
+        root.sel = r.sel;
+        root.typed = r.typed;
+    }
+    function choose(i: int) {
+        root.sel = i;
+        root.typed = 0;
+        scope.focus();
+    }
+    width: 116px;
     height: 26px;
     border-radius: 6px;
     border-width: 1px;
@@ -434,32 +459,71 @@ component TcField inherits Rectangle {
     accessible-role: text-input;
     accessible-label: root.label;
     accessible-value: root.text;
-    HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        Text {
-            text: root.text == "" ? "00:00:00:00" : root.text;
-            font-size: 12px;
-            color: root.text == "" ? Theme.disabled : Theme.text;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-        }
-    }
-    TouchArea {
-        mouse-cursor: MouseCursor.text;
-        clicked => { scope.focus(); }
-    }
     scope := FocusScope {
+        changed has-focus => {
+            if self.has-focus {
+                // reached with Tab: everything chosen, as in a text field
+                if root.sel == -1 { root.sel = 4; }
+            } else {
+                root.sel = -1;
+                root.typed = 0;
+                root.done();
+            }
+        }
         key-pressed(e) => {
-            if e.text == Key.Tab || e.text == Key.Backtab || e.modifiers.meta || e.modifiers.control {
+            if e.text == Key.Tab || e.text == Key.Backtab {
                 return reject;
             }
             if e.text == Key.Return || e.text == Key.Escape {
                 self.clear-focus();
                 return accept;
             }
-            root.text = root.key(root.text, e.text);
+            if e.modifiers.meta && (e.text == "v" || e.text == "V") {
+                root.apply(root.paste({ text: root.text, sel: root.sel, typed: root.typed }));
+                return accept;
+            }
+            if (e.modifiers.meta || e.modifiers.control) && e.text != "a" && e.text != "A" {
+                return reject;
+            }
+            root.apply(root.edit({ text: root.text, sel: root.sel, typed: root.typed }, e.text, e.modifiers.meta));
             accept
+        }
+        // a click beside the digits: everything
+        TouchArea {
+            mouse-cursor: MouseCursor.text;
+            clicked => { root.choose(4); }
+        }
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+            alignment: end;
+            for part[i] in root.parts(root.text): HorizontalLayout {
+                if i > 0: Text {
+                    text: ":";
+                    font-size: 12px;
+                    color: root.text == "" ? Theme.disabled : Theme.muted;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    y: 4px;
+                    height: parent.height - 8px;
+                    width: t.preferred-width + 4px;
+                    border-radius: 3px;
+                    background: scope.has-focus && (root.sel == i || root.sel == 4) ? Theme.accent.with-alpha(0.45) : transparent;
+                    t := Text {
+                        text: part;
+                        font-size: 12px;
+                        color: root.text == "" ? Theme.disabled : Theme.text;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                    TouchArea {
+                        mouse-cursor: MouseCursor.text;
+                        clicked => { root.choose(i); }
+                        double-clicked => { root.choose(4); }
+                    }
+                }
+            }
         }
     }
 }
@@ -1793,7 +1857,10 @@ export component AppWindow inherits SheetWindow {
     // the film between these master timecodes (empty: from the start / to the end): titles stay out
     in-out property <string> detect-from;
     in-out property <string> detect-to;
-    pure callback tc-key(string, string) -> string;
+    pure callback tc-edit(TcState, string, bool) -> TcState;
+    callback tc-paste(TcState) -> TcState;
+    pure callback tc-parts(string) -> [string];
+    callback film-changed();
     callback detect-cuts();
     in property <string> source-info;
     in property <string> source-error;
@@ -1809,7 +1876,7 @@ export component AppWindow inherits SheetWindow {
     // sheet (index into the paper list: 0 custom, 1–7 DIN A0..A6, 8–14 social media sizes in px); the list fills width × height, editing them picks the
     // matching size or Custom (Rust)
     in-out property <int> paper: 5;
-    // paper, margin and gap in px instead of mm (frame line and headline move are always px of the sheet); Rust converts the fields on a switch
+    // paper size in px instead of mm (margin, gap, frame line and headline move are always px of the sheet); Rust converts the fields on a switch
     in-out property <bool> px-units;
     out property <string> unit: root.px-units ? "px" : "mm";
     callback paper-chosen(int);
@@ -1857,6 +1924,13 @@ export component AppWindow inherits SheetWindow {
     in property <int> head-anchor: 1;
     in-out property <string> head-dx: "0";
     in-out property <string> head-dy: "94";
+    // space the stills keep from the headline, px of the sheet (24 px = the old 2 mm at 300 dpi); over the stills
+    // they can flow around it
+    in-out property <string> head-pad-t: "24";
+    in-out property <string> head-pad-r: "24";
+    in-out property <string> head-pad-b: "24";
+    in-out property <string> head-pad-l: "24";
+    in-out property <bool> head-wrap;
     // where Rust drew the headline and the trim area (the whole page without crop marks), as fractions of the page,
     // and the page width in px of the sheet (dragging, grid hits)
     in property <float> head-bx;
@@ -1889,8 +1963,9 @@ export component AppWindow inherits SheetWindow {
     in-out property <string> custom-w: "297";
     in-out property <string> custom-h: "210";
     in-out property <string> dpi: "300";
-    in-out property <string> margin: "10";
-    in-out property <string> gap: "3";
+    // px of the sheet; the defaults are the old 10 mm and 3 mm at 300 dpi
+    in-out property <string> margin: "118";
+    in-out property <string> gap: "35";
     in-out property <bool> auto-cols: true;
     in-out property <string> cols: "4";
     // names of the fields Rust could not read ("dpi", "margin", …)
@@ -2005,13 +2080,21 @@ export component AppWindow inherits SheetWindow {
                                         Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
                                         Row {
                                             text: @tr("Film starts at");
-                                            TcField { text <=> root.detect-from; label: @tr("Film starts at"); key(t, k) => { root.tc-key(t, k) } }
+                                            TcField {
+                                                text <=> root.detect-from; label: @tr("Film starts at");
+                                                edit(s, k, m) => { root.tc-edit(s, k, m) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
+                                                done => { root.film-changed(); }
+                                            }
                                         }
                                         Row {
                                             text: @tr("Film ends at");
-                                            TcField { text <=> root.detect-to; label: @tr("Film ends at"); key(t, k) => { root.tc-key(t, k) } }
+                                            TcField {
+                                                text <=> root.detect-to; label: @tr("Film ends at");
+                                                edit(s, k, m) => { root.tc-edit(s, k, m) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
+                                                done => { root.film-changed(); }
+                                            }
                                         }
-                                        Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."); }
+                                        Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."); }
                                     }
                                 }
                                 if root.mode == 1: VerticalLayout {
@@ -2146,16 +2229,16 @@ export component AppWindow inherits SheetWindow {
                                 Row {
                                     text: @tr("Margin");
                                     NumberField {
-                                        text <=> root.margin; unit: root.unit; label: @tr("Margin"); invalid: root.invalid == "margin";
-                                        scrub: root.px-units ? 1 : 0.5; step: 1;
+                                        text <=> root.margin; unit: "px"; label: @tr("Margin"); invalid: root.invalid == "margin";
+                                        scrub: 1; step: 1;
                                         edited => { root.sheet-changed(); }
                                     }
                                 }
                                 Row {
                                     text: @tr("Gap between stills");
                                     NumberField {
-                                        text <=> root.gap; unit: root.unit; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
-                                        scrub: root.px-units ? 0.5 : 0.1; step: 1;
+                                        text <=> root.gap; unit: "px"; label: @tr("Gap between stills"); invalid: root.invalid == "gap";
+                                        scrub: 0.5; step: 1;
                                         edited => { root.sheet-changed(); }
                                     }
                                 }
@@ -2297,6 +2380,26 @@ export component AppWindow inherits SheetWindow {
                                     }
                                     Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
                                     Para { text: @tr("The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."); }
+                                    Rectangle { height: 8px; }
+                                    Row {
+                                        text: @tr("Space above · below");
+                                        NumberField { width: 78px; text <=> root.head-pad-t; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space above"); invalid: root.invalid == "head-pad-t"; edited => { root.sheet-changed(); } }
+                                        NumberField { width: 78px; text <=> root.head-pad-b; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space below"); invalid: root.invalid == "head-pad-b"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Space left · right");
+                                        NumberField { width: 78px; text <=> root.head-pad-l; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space left"); invalid: root.invalid == "head-pad-l"; edited => { root.sheet-changed(); } }
+                                        NumberField { width: 78px; text <=> root.head-pad-r; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space right"); invalid: root.invalid == "head-pad-r"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Stills around the headline");
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Switch { on: root.head-wrap; label: @tr("Stills around the headline"); toggled => { root.head-wrap = !root.head-wrap; root.sheet-changed(); } }
+                                        }
+                                    }
+                                    Para { text: @tr("The space is what the stills keep from the headline. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the headline, leave its place free and go on in the next cells."); }
+                                    Rectangle { height: 8px; }
                                     Row {
                                         text: @tr("Grid");
                                         VerticalLayout {
@@ -2537,12 +2640,12 @@ export component AppWindow inherits SheetWindow {
                     border-width: 1px;
                     border-radius: 3px;
                     border-color: hd.has-hover || hd.pressed ? Theme.accent : Theme.accent.with-alpha(0.35);
-                    // ticks across the frame at the middle of each side: where the centre of the text is; green when
+                    // ticks (1 px like the grid lines) across the frame at the middle of each side: where the centre of the text is; green when
                     // the middle lies on a grid line (top / bottom ticks: a vertical line, left / right: a horizontal one)
-                    Rectangle { x: parent.width / 2 - 1px; y: -7px; width: 2px; height: 14px; background: root.on-grid-x ? Theme.online : Theme.accent; }
-                    Rectangle { x: parent.width / 2 - 1px; y: parent.height - 7px; width: 2px; height: 14px; background: root.on-grid-x ? Theme.online : Theme.accent; }
-                    Rectangle { x: -7px; y: parent.height / 2 - 1px; width: 14px; height: 2px; background: root.on-grid-y ? Theme.online : Theme.accent; }
-                    Rectangle { x: parent.width - 7px; y: parent.height / 2 - 1px; width: 14px; height: 2px; background: root.on-grid-y ? Theme.online : Theme.accent; }
+                    Rectangle { x: parent.width / 2 - 0.5px; y: -7px; width: 1px; height: 14px; background: root.on-grid-x ? Theme.online : Theme.accent; }
+                    Rectangle { x: parent.width / 2 - 0.5px; y: parent.height - 7px; width: 1px; height: 14px; background: root.on-grid-x ? Theme.online : Theme.accent; }
+                    Rectangle { x: -7px; y: parent.height / 2 - 0.5px; width: 14px; height: 1px; background: root.on-grid-y ? Theme.online : Theme.accent; }
+                    Rectangle { x: parent.width - 7px; y: parent.height / 2 - 0.5px; width: 14px; height: 1px; background: root.on-grid-y ? Theme.online : Theme.accent; }
                 }
                 hd := TouchArea {
                     x: page.x + page.width * (self.pressed ? parent.bx0 : root.head-bx) - 4px;

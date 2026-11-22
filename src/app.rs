@@ -654,8 +654,9 @@ fn read_sheet(app: &AppWindow) -> Result<layout::Sheet, &'static str> {
     let per = if app.get_px_units() { 25.4 / dpi } else { 1.0 };
     let w = length(&app.get_custom_w(), per, 10.0, 5000.0, "width")?;
     let h = length(&app.get_custom_h(), per, 10.0, 5000.0, "height")?;
-    let margin = length(&app.get_margin(), per, 0.0, w.min(h) / 2.0 - 1.0, "margin")?;
-    let gap = length(&app.get_gap(), per, 0.0, 500.0, "gap")?;
+    // margin and gap always in px of the sheet (user 2026-11-22)
+    let margin = length(&app.get_margin(), 25.4 / dpi, 0.0, w.min(h) / 2.0 - 1.0, "margin")?;
+    let gap = length(&app.get_gap(), 25.4 / dpi, 0.0, 500.0, "gap")?;
     let columns = if app.get_auto_cols() { None } else { Some(num(&app.get_cols(), 1.0, 1000.0, "columns")? as u32) };
     Ok(layout::Sheet { width_mm: w, height_mm: h, dpi, margin_mm: margin, gap_mm: gap, columns, ..Default::default() })
 }
@@ -713,11 +714,9 @@ fn switch_unit(app: &AppWindow, px: bool) {
     let old = mm_per_unit(app);
     app.set_px_units(px);
     let new = mm_per_unit(app);
-    let fields: [(Getter, Setter, f64); 4] = [
+    let fields: [(Getter, Setter, f64); 2] = [
         (AppWindow::get_custom_w, AppWindow::set_custom_w, 1.0),
         (AppWindow::get_custom_h, AppWindow::set_custom_h, 1.0),
-        (AppWindow::get_margin, AppWindow::set_margin, 0.0),
-        (AppWindow::get_gap, AppWindow::set_gap, 0.0),
     ];
     for (get, set, least) in fields {
         // an unusable value stays as typed (and red)
@@ -827,7 +826,14 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
             let valign = [layout::VAlign::Top, layout::VAlign::Middle, layout::VAlign::Bottom][anchor as usize / 3];
             let dx_mm = length(&app.get_head_dx(), per, -2000.0, 2000.0, "head-dx")?;
             let dy_mm = length(&app.get_head_dy(), per, -2000.0, 2000.0, "head-dy")?;
-            sheet.headline = Some(layout::Headline { text, face, size_pt: size, color, align, valign, dx_mm, dy_mm });
+            let pad = |s: SharedString, field| length(&s, per, 0.0, 500.0, field);
+            let pad_mm = [
+                pad(app.get_head_pad_t(), "head-pad-t")?,
+                pad(app.get_head_pad_r(), "head-pad-r")?,
+                pad(app.get_head_pad_b(), "head-pad-b")?,
+                pad(app.get_head_pad_l(), "head-pad-l")?,
+            ];
+            sheet.headline = Some(layout::Headline { text, face, size_pt: size, color, align, valign, dx_mm, dy_mm, pad_mm, wrap: app.get_head_wrap() });
         }
     }
     Ok(())
@@ -961,7 +967,7 @@ fn preset_json(app: &AppWindow) -> serde_json::Value {
     let font = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned()).unwrap_or_default();
     serde_json::json!({
         "px-units": app.get_px_units(), "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
-        "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
+        "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "spacing-px": true, "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
         "picture": app.get_picture(), "aspect": app.get_aspect().as_str(), "trim": app.get_trim(),
         "line-on": app.get_line_on(), "lengths-px": true, "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
@@ -969,6 +975,8 @@ fn preset_json(app: &AppWindow) -> serde_json::Value {
         "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
         "head-color": app.get_head_color().as_str(), "head-anchor": app.get_head_anchor(),
         "head-dx": app.get_head_dx().as_str(), "head-dy": app.get_head_dy().as_str(),
+        "head-pad": [app.get_head_pad_t().as_str(), app.get_head_pad_r().as_str(), app.get_head_pad_b().as_str(), app.get_head_pad_l().as_str()],
+        "head-wrap": app.get_head_wrap(),
         "export-format": app.get_export_format(),
     })
 }
@@ -1028,6 +1036,16 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     int("head-anchor", 8, &|n| app.set_head_anchor(n));
     text("head-dx", &|s| app.set_head_dx(s));
     text("head-dy", &|s| app.set_head_dy(s));
+    // since 2026-11-22: space around the headline and stills flowing around it (older presets keep the fields)
+    if let Some(p) = v.get("head-pad").and_then(|x| x.as_array()).filter(|p| p.len() == 4) {
+        let sets: [fn(&AppWindow, SharedString); 4] = [AppWindow::set_head_pad_t, AppWindow::set_head_pad_r, AppWindow::set_head_pad_b, AppWindow::set_head_pad_l];
+        for (x, set) in p.iter().zip(sets) {
+            if let Some(t) = x.as_str().filter(|t| t.len() < 10) {
+                set(app, t.into());
+            }
+        }
+    }
+    boolean("head-wrap", &|b| app.set_head_wrap(b));
     int("export-format", 3, &|n| app.set_export_format(n));
     match_slots(app);
     // presets from before whole numbers: round
@@ -1057,6 +1075,15 @@ fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
         ] {
             if let Ok(x) = whole(&get(app), "") {
                 set(app, in_unit(x.max(least), per));
+            }
+        }
+    }
+    // until 2026-11-22 margin and gap were in the unit of the Sheet tab; now always px
+    if v.get("spacing-px").is_none() && !app.get_px_units() {
+        let per = mm_per_px(app);
+        for (get, set) in [(AppWindow::get_margin as Getter, AppWindow::set_margin as Setter), (AppWindow::get_gap, AppWindow::set_gap)] {
+            if let Ok(x) = whole(&get(app), "") {
+                set(app, in_unit(x, per));
             }
         }
     }
@@ -1349,11 +1376,16 @@ fn pairs(st: &State) -> Vec<(usize, CutSource)> {
 }
 
 /// The shots found in a master's picture as a one-track timeline in record frames (the master's timecode).
-fn detected_timeline(master: &Path, cuts: &[i64], info: &frames::VideoInfo) -> Timeline {
+/// The shots of detected `cuts`, only between `film` start and end (master timecode frames; None = no limit): a shot
+/// the start or end cuts through keeps its part inside.
+fn detected_timeline(master: &Path, cuts: &[i64], info: &frames::VideoInfo, film: (Option<i64>, Option<i64>)) -> Timeline {
+    let (lo, hi) = (film.0.unwrap_or(i64::MIN), film.1.unwrap_or(i64::MAX));
     let items = cuts
         .windows(2)
+        .map(|w| ((info.start_tc + w[0]).max(lo), (info.start_tc + w[1]).min(hi)))
+        .filter(|(a, b)| a < b)
         .enumerate()
-        .map(|(k, w)| Item { name: format!("{} {}", tr(["Shot", "Shot", "Plan", "Plano"]), k + 1), start: info.start_tc + w[0], end: info.start_tc + w[1], key: 0 })
+        .map(|(k, (start, end))| Item { name: format!("{} {}", tr(["Shot", "Shot", "Plan", "Plano"]), k + 1), start, end, key: 0 })
         .collect();
     Timeline { name: master.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), rate: info.rate, tracks: vec![Track { items }] }
 }
@@ -1402,10 +1434,24 @@ fn load_source(app: &AppWindow) {
         }
         let mut shots = vec![];
         let mut first: Option<Timeline> = None;
+        // detected cuts: only the film between start and end (titles stay out); changing them needs no new analysis
+        let (from, to) = (app.get_detect_from(), app.get_detect_to());
         for (i, source) in &pairs {
+            let info = &st.masters[*i].1;
             let read = match source {
-                CutSource::List(list) => read_cut_list(list, st.masters[*i].1.rate).map_err(|e| format!("{}: {e}", file_name(list))),
-                CutSource::Detected(cuts) => Ok(detected_timeline(&st.masters[*i].0, cuts, &st.masters[*i].1)),
+                CutSource::List(list) => read_cut_list(list, info.rate).map_err(|e| format!("{}: {e}", file_name(list))),
+                CutSource::Detected(cuts) => {
+                    let tc = |s: &str| (!s.is_empty()).then(|| cinemosaic::timeline::parse_tc(s, info.rate, false)).flatten();
+                    let t = detected_timeline(&st.masters[*i].0, cuts, info, (tc(&from), tc(&to)));
+                    if t.tracks.iter().all(|k| k.items.is_empty()) {
+                        Err(tr(["{}: no picture between start and end (the master runs from {} to {})", "{}: kein Bild zwischen Beginn und Ende (der Master läuft von {} bis {})", "{} : aucune image entre début et fin (le master va de {} à {})", "{}: no hay imagen entre inicio y fin (el máster va de {} a {})"])
+                            .replacen("{}", &file_name(&st.masters[*i].0), 1)
+                            .replacen("{}", &format_tc(info.start_tc, info.rate), 1)
+                            .replacen("{}", &format_tc(info.start_tc + cuts.last().copied().unwrap_or(0), info.rate), 1))
+                    } else {
+                        Ok(t)
+                    }
+                }
             };
             match read {
                 Ok(t) => {
@@ -1614,6 +1660,116 @@ fn tc_key(text: &str, key: &str) -> String {
     }
 }
 
+/// The four parts of a timecode field (hours, minutes, seconds, frames); empty = all zero.
+fn tc_parts(text: &str) -> [u32; 4] {
+    let mut p = [0; 4];
+    for (k, v) in text.split(':').filter_map(|v| v.parse().ok()).take(4).enumerate() {
+        p[k] = v;
+    }
+    p
+}
+
+fn tc_text(p: [u32; 4]) -> String {
+    if p == [0; 4] { String::new() } else { format!("{:02}:{:02}:{:02}:{:02}", p[0], p[1], p[2], p[3]) }
+}
+
+/// A key in a timecode field, as in the timecode fields of editing apps. `sel`: -1 nothing, 0–3 one part chosen
+/// (hours … frames), 4 everything chosen, 5 typing the whole timecode; `typed`: digits typed into the chosen part.
+/// A part: two digits replace it (one: "0d") and the next part is chosen, ↑ / ↓ count it up / down, ← / → and ":"
+/// choose the neighbour, Backspace sets it to 00. Everything (⌘A, double-click, Tab): a digit starts a new timecode
+/// filled from the right like in Avid, Backspace empties the field. `last_frame`: the highest frame number.
+fn tc_edit(st: TcState, key: &str, meta: bool, last_frame: u32) -> TcState {
+    let mut p = tc_parts(&st.text);
+    let max = [23, 59, 59, last_frame];
+    let (mut sel, mut typed) = (st.sel, 0);
+    let part = if (0..4).contains(&sel) { sel as usize } else { 3 };
+    let mut text = None;
+    match key {
+        "a" | "A" if meta => sel = 4,
+        _ if meta => return st,
+        "\u{f700}" | "\u{f701}" => {
+            let v = p[part] as i64 + if key == "\u{f700}" { 1 } else { -1 };
+            p[part] = v.rem_euclid(max[part] as i64 + 1) as u32;
+            sel = part as i32;
+        }
+        "\u{f702}" => sel = if sel >= 4 || sel < 0 { 0 } else { (sel - 1).max(0) },
+        "\u{f703}" | ":" | "." => sel = if sel >= 4 || sel < 0 { 3 } else { (sel + 1).min(3) },
+        "\u{8}" | "\u{7f}" => match sel {
+            4 => {
+                text = Some(String::new());
+                sel = 5;
+            }
+            0..=3 => p[part] = 0,
+            _ => text = Some(tc_key(&st.text, key)),
+        },
+        k if k.len() == 1 && k.as_bytes()[0].is_ascii_digit() => {
+            let d = k.parse::<u32>().unwrap_or(0);
+            match sel {
+                0..=3 if st.typed == 0 => {
+                    p[part] = d.min(max[part]);
+                    typed = 1;
+                }
+                0..=3 => {
+                    p[part] = ((p[part] % 10) * 10 + d).min(max[part]);
+                    sel = (sel + 1).min(3);
+                }
+                4 => {
+                    text = Some(tc_typed(k, ""));
+                    sel = 5;
+                }
+                _ => {
+                    text = Some(tc_key(&st.text, k));
+                    sel = 5;
+                }
+            }
+        }
+        _ => return st,
+    }
+    TcState { text: text.unwrap_or_else(|| tc_text(p)).into(), sel, typed }
+}
+
+/// The highest frame number of a timecode in the first master (24 without one).
+fn last_frame(app: &AppWindow) -> u32 {
+    with_state(app, |st| st.borrow().masters.first().map_or(25, |m| m.1.rate.nominal()) as u32 - 1)
+}
+
+/// Text on the clipboard (macOS).
+fn clipboard_text() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        let board: *mut AnyObject = msg_send![class!(NSPasteboard), generalPasteboard];
+        let kind = std::ffi::CString::new("public.utf8-plain-text").ok()?;
+        let kind: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: kind.as_ptr()];
+        let s: *mut AnyObject = msg_send![board, stringForType: kind];
+        if s.is_null() {
+            return None;
+        }
+        let c: *const std::ffi::c_char = msg_send![s, UTF8String];
+        return (!c.is_null()).then(|| std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned());
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+/// ⌘V in a timecode field: "01:02:03:04", "01020304" or "1:2:3:4" from the clipboard; anything else changes nothing.
+fn tc_pasted(st: TcState, clip: &str, last_frame: u32) -> TcState {
+    let clip = clip.trim();
+    let parts: Vec<&str> = clip.split([':', ';', '.']).collect();
+    let p: Option<Vec<u32>> = if parts.len() == 4 {
+        parts.iter().map(|v| v.parse().ok()).collect()
+    } else if (1..=8).contains(&clip.len()) && clip.bytes().all(|b| b.is_ascii_digit()) {
+        Some(tc_parts(&tc_typed(clip, "")).to_vec())
+    } else {
+        None
+    };
+    match p {
+        Some(p) if p[0] <= 23 && p[1] <= 59 && p[2] <= 59 && p[3] <= last_frame => TcState { text: tc_text([p[0], p[1], p[2], p[3]]).into(), sel: 4, typed: 0 },
+        _ => st,
+    }
+}
+
 /// Finds the cuts of every master that has neither a cut list nor detected cuts (in a thread; pause and cancel work).
 fn detect_cuts(app: &AppWindow) {
     let (todo, gate) = with_state(app, |st| {
@@ -1630,34 +1786,20 @@ fn detect_cuts(app: &AppWindow) {
     if todo.is_empty() {
         return;
     }
-    // the film between these timecodes (empty: from the start / to the end): opening and end titles stay out
-    let (from, to) = (app.get_detect_from().trim().to_string(), app.get_detect_to().trim().to_string());
-    let tc = |s: &str, info: &frames::VideoInfo| if s.is_empty() { Ok(None) } else { cinemosaic::timeline::parse_tc(s, info.rate, false).map(Some).ok_or(()) };
-    let mut ranges = vec![];
-    for (_, info) in &todo {
-        match (tc(&from, info), tc(&to, info)) {
-            (Ok(f), Ok(t)) => ranges.push((f.map_or(0, |f| (f - info.start_tc).max(0)), t.map(|t| t - info.start_tc))),
-            (f, _) => {
-                let which = if f.is_err() { &from } else { &to };
-                app.set_source_error(tr(["“{}” is not a timecode like 01:00:00:00", "„{}“ ist kein Timecode wie 01:00:00:00", "« {} » n’est pas un timecode comme 01:00:00:00", "«{}» no es un timecode como 01:00:00:00"]).replace("{}", which).into());
-                return;
-            }
-        }
-    }
     app.set_state(1);
     app.set_paused(false);
     app.set_progress(0.0);
     app.set_work_text(tr(["Looking for the cuts…", "Suche die Schnitte…", "Recherche des coupes…", "Buscando los cortes…"]).into());
     app.set_time_left("".into());
     app.set_source_error("".into());
-    let ranged = !from.is_empty() || !to.is_empty();
     let weak = app.as_weak();
     std::thread::spawn(move || {
         let start = Instant::now();
         let n = todo.len();
         let mut found = vec![];
         let mut errors = vec![];
-        for (k, ((path, info), &(from, to))) in todo.iter().zip(&ranges).enumerate() {
+        // always the whole film: start and end only choose the shots afterwards (load_source), so they can change
+        for (k, (path, info)) in todo.iter().enumerate() {
             let progress = |done: i64, total: i64| {
                 let part = if total > 0 { done as f64 / total as f64 } else { 0.0 };
                 let share = (k as f64 + part) / n as f64;
@@ -1674,11 +1816,8 @@ fn detect_cuts(app: &AppWindow) {
                     }
                 });
             };
-            // a master wholly before the start or after the end has nothing to look at
-            let outside = to.is_some_and(|t| t <= from);
-            match if outside { Ok(Some(vec![])) } else { frames::detect_cuts(path, info.rate, from, to, &|| gate.go(), &progress) } {
+            match frames::detect_cuts(path, info.rate, 0, None, &|| gate.go(), &progress) {
                 Ok(Some(cuts)) if cuts.len() > 1 => found.push((path.clone(), cuts)),
-                Ok(Some(_)) if ranged => errors.push(format!("{}: {}", file_name(path), tr(["no picture between start and end", "kein Bild zwischen Beginn und Ende", "aucune image entre début et fin", "no hay imagen entre inicio y fin"]))),
                 Ok(Some(_)) => errors.push(format!("{}: {}", file_name(path), tr(["no picture found", "kein Bild gefunden", "aucune image trouvée", "no se encontró imagen"]))),
                 Ok(None) => break,
                 Err(e) => errors.push(format!("{}: {e}", file_name(path))),
@@ -1914,6 +2053,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
         "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
+        "film": [app.get_detect_from().as_str(), app.get_detect_to().as_str()],
         "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "detected": st.detected, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
     })
@@ -2005,6 +2145,7 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             volumes_off: st.volumes.iter().filter(|v| !v.1).map(|v| v.0.clone()).collect(),
             look: preset_json(app),
             headline: app.get_headline().to_string(),
+            film: (app.get_detect_from().to_string(), app.get_detect_to().to_string()),
             name: t.name,
             rate: t.rate,
             sequences: st.sequences,
@@ -2072,6 +2213,8 @@ fn open_project(app: &AppWindow, path: PathBuf) {
         st.masters.clear();
         st.lists = p.lists.clone();
         st.detected = p.detected.clone();
+        app.set_detect_from(p.film.0.clone().into());
+        app.set_detect_to(p.film.1.clone().into());
         st.bin = p.bin.clone();
         st.volumes = p.volumes_off.iter().map(|v| (v.clone(), false)).collect();
         st.done = p.stills.iter().filter_map(|s| Some((s.job.clone()?, s.file.clone().ok()?))).collect();
@@ -2540,7 +2683,34 @@ fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
         }
     });
     // masters without a cut list: the cuts are looked for in the picture, one master after the other (whole files)
-    app.on_tc_key(|text, key| tc_key(&text, &key).into());
+    app.on_tc_edit({
+        let weak = app.as_weak();
+        move |st, key, meta| match weak.upgrade() {
+            Some(app) => tc_edit(st, &key, meta, last_frame(&app)),
+            None => st,
+        }
+    });
+    app.on_tc_paste({
+        let weak = app.as_weak();
+        move |st| match (weak.upgrade(), clipboard_text()) {
+            (Some(app), Some(clip)) => tc_pasted(st, &clip, last_frame(&app)),
+            _ => st,
+        }
+    });
+    app.on_tc_parts(|text| {
+        let v: Vec<SharedString> = tc_parts(&text).iter().map(|v| format!("{v:02}").into()).collect();
+        ModelRc::new(VecModel::from(v))
+    });
+    // start or end of the film changed: the detected shots follow at once
+    app.on_film_changed({
+        let weak = app.as_weak();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            if app.get_mode() == 0 && with_state(&app, |st| !st.borrow().detected.is_empty()) {
+                load_source(&app);
+            }
+        }
+    });
     app.on_detect_cuts({
         let weak = app.as_weak();
         move || weak.upgrade().iter().for_each(detect_cuts)
@@ -3422,6 +3592,39 @@ mod tests {
         assert_eq!(typed, "10:01:30:00"); // the 9th digit (5) is refused
         assert_eq!(super::tc_key("10:01:30:00", "\u{8}"), "01:00:13:00");
         assert_eq!(super::tc_key("00:00:00:07", "\u{7f}"), "");
+    }
+
+    #[test]
+    fn timecode_parts_are_chosen_and_typed_like_in_editing_apps() {
+        use super::{TcState, tc_edit, tc_pasted};
+        let st = |t: &str, sel: i32, typed: i32| TcState { text: t.into(), sel, typed };
+        let keys = |mut s: TcState, ks: &[&str]| {
+            for k in ks {
+                s = tc_edit(s, k, false, 24);
+            }
+            (s.text.to_string(), s.sel, s.typed)
+        };
+        // hours chosen: two digits replace them, the minutes come next
+        assert_eq!(keys(st("10:20:30:12", 0, 0), &["0", "1"]), ("01:20:30:12".into(), 1, 0));
+        assert_eq!(keys(st("10:20:30:12", 0, 0), &["7"]), ("07:20:30:12".into(), 0, 1));
+        // too large: the highest the part allows
+        assert_eq!(keys(st("", 1, 0), &["9", "9"]), ("00:59:00:00".into(), 2, 0));
+        assert_eq!(keys(st("", 3, 0), &["3", "0"]), ("00:00:00:24".into(), 3, 0));
+        // up / down count the chosen part round; left / right choose
+        assert_eq!(keys(st("00:59:00:00", 1, 0), &["\u{f700}"]), ("".into(), 1, 0));
+        assert_eq!(keys(st("", 3, 0), &["\u{f701}"]), ("00:00:00:24".into(), 3, 0));
+        assert_eq!(keys(st("01:00:00:00", 2, 0), &["\u{f702}", "\u{f702}", "\u{f702}"]).1, 0);
+        // Backspace: the part to 00; everything chosen: empty, then typed from the right
+        assert_eq!(keys(st("01:02:03:04", 1, 0), &["\u{8}"]).0, "01:00:03:04");
+        assert_eq!(keys(st("01:02:03:04", 4, 0), &["\u{8}"]), ("".into(), 5, 0));
+        assert_eq!(keys(st("01:02:03:04", 4, 0), &["1", "2", "3"]), ("00:00:01:23".into(), 5, 0));
+        assert_eq!(tc_edit(st("01:02:03:04", 1, 0), "a", true, 24).sel, 4);
+        assert_eq!(tc_edit(st("01:02:03:04", 1, 0), "x", false, 24).text, "01:02:03:04");
+        // paste
+        assert_eq!(tc_pasted(st("", 1, 0), " 01:00:10:00\n", 24).text, "01:00:10:00");
+        assert_eq!(tc_pasted(st("", 1, 0), "1001000", 24).text, "01:00:10:00");
+        assert_eq!(tc_pasted(st("09:00:00:00", 1, 0), "hello", 24).text, "09:00:00:00");
+        assert_eq!(tc_pasted(st("", 1, 0), "01:00:10:30", 24).text, ""); // frame 30 at 25 fps
     }
 
     #[test]

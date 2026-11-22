@@ -296,8 +296,8 @@ msgstr "Le film commence à"
 msgid "Film ends at"
 msgstr "Le film finit à"
 
-msgid "Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."
-msgstr "Timecode du fichier master, p. ex. 01:01:30:00, pour laisser de côté le générique de début et de fin. Vide : depuis le début, jusqu’à la fin."
+msgid "Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."
+msgstr "Timecode du fichier master, p. ex. 01:01:30:00, pour laisser de côté les génériques ; les plans suivent aussitôt. Cliquez sur heures, minutes, secondes ou images pour les changer, double-cliquez pour tout le timecode. Vide : du début, jusqu'à la fin."
 
 msgid "Detect cuts"
 msgstr "Détecter les coupes"
@@ -436,6 +436,30 @@ msgstr "Grille tous les"
 
 msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."
 msgstr "La grille n'apparaît que dans l'aperçu, elle n'est pas exportée. Elle couvre la page, ou la zone à l'intérieur des traits de coupe ; les lignes plus marquées sont son milieu. Les petits traits sur le cadre du titre passent au vert quand le milieu du texte est sur une ligne de la grille."
+
+msgid "Space above · below"
+msgstr "Espace en haut · en bas"
+
+msgid "Space left · right"
+msgstr "Espace à gauche · à droite"
+
+msgid "Space above"
+msgstr "Espace en haut"
+
+msgid "Space below"
+msgstr "Espace en bas"
+
+msgid "Space left"
+msgstr "Espace à gauche"
+
+msgid "Space right"
+msgstr "Espace à droite"
+
+msgid "Stills around the headline"
+msgstr "Images autour du titre"
+
+msgid "The space is what the stills keep from the headline. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the headline, leave its place free and go on in the next cells."
+msgstr "L'espace est ce que les images laissent libre autour du titre. En haut ou en bas, elles restent en dessous ou au-dessus ; sur les images, elles passent dessous – ou, avec Images autour du titre, laissent sa place libre et continuent dans les cellules suivantes."
 
 msgid "Crop marks"
 msgstr "Traits de coupe"

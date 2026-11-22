@@ -16,6 +16,7 @@ const MARK_OFFSET: f64 = 3.0;
 const MARK_LENGTH: f64 = 6.0;
 /// Space between the headline and the line ends it breaks, and between headline / line and the stills (mm).
 const BREAK_PAD: f64 = 2.0;
+/// between the frame line and the stills (mm); the headline has its own space (`Headline::pad_mm`)
 const CLEARANCE: f64 = 2.0;
 
 /// Line patterns: parallel strands, no dashes. Each strand: (distance inward from the outer edge, width), both in
@@ -88,6 +89,10 @@ pub struct Headline {
     /// moved from that point, right and down positive
     pub dx_mm: f64,
     pub dy_mm: f64,
+    /// space the stills keep from the text box: top, right, bottom, left
+    pub pad_mm: [f64; 4],
+    /// over the stills: they leave its place (with the space around it) free and flow on around it
+    pub wrap: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +147,8 @@ pub struct Grid {
     pub x: f64,
     pub y: f64,
     pub gap: f64,
+    /// cells touching this stay empty (the headline with its space, when the stills flow around it)
+    pub keep_out: Option<Rect>,
 }
 
 /// Pixel scale for a size in points at `dpi`: points are em sizes, ab_glyph scales by the font's height.
@@ -222,9 +229,10 @@ impl Sheet {
             inset.iter_mut().for_each(|i| *i = i.max(need));
         }
         if let (Some((r, _, _)), Some(hl)) = (&text, &self.headline) {
+            // the stills keep the headline's space below / above it
             match hl.valign {
-                VAlign::Top if r.y + r.h < trim.y + trim.h / 2.0 => inset[0] = inset[0].max(r.y + r.h - trim.y + clear),
-                VAlign::Bottom if r.y > trim.y + trim.h / 2.0 => inset[2] = inset[2].max(trim.y + trim.h - r.y + clear),
+                VAlign::Top if r.y + r.h < trim.y + trim.h / 2.0 => inset[0] = inset[0].max(r.y + r.h - trim.y + self.px(hl.pad_mm[2])),
+                VAlign::Bottom if r.y > trim.y + trim.h / 2.0 => inset[2] = inset[2].max(trim.y + trim.h - r.y + self.px(hl.pad_mm[0])),
                 _ => {} // in the middle the headline lies over the stills
             }
         }
@@ -239,28 +247,65 @@ impl Sheet {
 
     /// Grid for `n` stills of width/height `aspect`.
     pub fn grid(&self, n: usize, aspect: f64) -> Grid {
-        let area = self.plan().area;
+        let plan = self.plan();
+        let area = plan.area;
         let n = n.max(1) as u32;
         let g = self.px(self.gap_mm);
+        // the stills flow around the headline: its box with the space around it stays free
+        let keep_out = match (&plan.text, &self.headline) {
+            (Some((r, _, _)), Some(hl)) if hl.wrap => {
+                let [t, rt, b, l] = hl.pad_mm.map(|v| self.px(v));
+                Some(Rect { x: r.x - l, y: r.y - t, w: r.w + l + rt, h: r.h + t + b })
+            }
+            _ => None,
+        };
+        let place = |cols: u32, rows: u32| {
+            let cw = ((area.w - (cols - 1) as f64 * g) / cols as f64).min((area.h - (rows - 1) as f64 * g) / rows as f64 * aspect).max(0.0);
+            let ch = cw / aspect;
+            let (bw, bh) = (cols as f64 * cw + (cols - 1) as f64 * g, rows as f64 * ch + (rows - 1) as f64 * g);
+            Grid { cols, rows, cell_w: cw, cell_h: ch, x: area.x + (area.w - bw) / 2.0, y: area.y + (area.h - bh) / 2.0, gap: g, keep_out }
+        };
+        // as many rows as the stills need beside the cells the headline takes (a few more rows can free a cell)
         let fit = |cols: u32| {
-            let rows = n.div_ceil(cols);
-            let cw = ((area.w - (cols - 1) as f64 * g) / cols as f64).min((area.h - (rows - 1) as f64 * g) / rows as f64 * aspect);
-            (cols, rows, cw.max(0.0))
+            let mut rows = n.div_ceil(cols);
+            loop {
+                let grid = place(cols, rows);
+                if grid.slots() >= n as usize || rows > n + 50 {
+                    return grid;
+                }
+                rows += 1;
+            }
         };
-        let (cols, rows, cw) = match self.columns {
+        match self.columns {
             Some(c) => fit(c.clamp(1, n)),
-            None => (1..=n).map(fit).fold((1, n, -1.0), |best, c| if c.2 > best.2 { c } else { best }),
-        };
-        let ch = cw / aspect;
-        let (bw, bh) = (cols as f64 * cw + (cols - 1) as f64 * g, rows as f64 * ch + (rows - 1) as f64 * g);
-        Grid { cols, rows, cell_w: cw, cell_h: ch, x: area.x + (area.w - bw) / 2.0, y: area.y + (area.h - bh) / 2.0, gap: g }
+            None => (1..=n).map(fit).fold(None::<Grid>, |best, c| match best {
+                Some(b) if b.cell_w >= c.cell_w => Some(b),
+                _ => Some(c),
+            }).expect("n >= 1"),
+        }
     }
 }
 
 impl Grid {
-    /// Cell `i` as whole pixels (x, y, w, h). Neighbouring cells share their edge pixel when the gap is 0.
+    /// Whether grid position `k` (row by row) is free for a still.
+    fn free(&self, k: u32) -> bool {
+        let Some(o) = self.keep_out else { return true };
+        let (c, r) = (k % self.cols, k / self.cols);
+        let x = self.x + c as f64 * (self.cell_w + self.gap);
+        let y = self.y + r as f64 * (self.cell_h + self.gap);
+        !(x < o.x + o.w && o.x < x + self.cell_w && y < o.y + o.h && o.y < y + self.cell_h)
+    }
+
+    /// How many stills the grid holds (its cells less those the headline keeps free).
+    pub fn slots(&self) -> usize {
+        (0..self.cols * self.rows).filter(|&k| self.free(k)).count()
+    }
+
+    /// Cell of still `i` as whole pixels (x, y, w, h): the `i`-th free grid position. Neighbouring cells share their
+    /// edge pixel when the gap is 0.
     pub fn cell(&self, i: usize) -> (u32, u32, u32, u32) {
-        let (c, r) = (i as u32 % self.cols, i as u32 / self.cols);
+        let k = if self.keep_out.is_some() { (0..).filter(|&k| self.free(k)).nth(i).unwrap_or(i as u32) } else { i as u32 };
+        let (c, r) = (k % self.cols, k / self.cols);
         let x = self.x + c as f64 * (self.cell_w + self.gap);
         let y = self.y + r as f64 * (self.cell_h + self.gap);
         let (x0, y0) = (x.round() as u32, y.round() as u32);
@@ -540,7 +585,7 @@ mod tests {
     #[test]
     fn headline_hangs_at_its_anchor_and_breaks_only_a_line_it_covers() {
         let Some(face) = face() else { return }; // no fonts (not on a Mac)
-        let hl = |dy: f64| Headline { text: "Rough Cut 3".into(), face: face.clone(), size_pt: 24.0, color: [200, 0, 0], align: Align::Center, valign: VAlign::Top, dx_mm: 0.0, dy_mm: dy };
+        let hl = |dy: f64| Headline { text: "Rough Cut 3".into(), face: face.clone(), size_pt: 24.0, color: [200, 0, 0], align: Align::Center, valign: VAlign::Top, dx_mm: 0.0, dy_mm: dy, pad_mm: [2.0; 4], wrap: false };
         let line = Line { width_mm: 0.5, inset_mm: 8.0, color: [0, 0, 0], pattern: Pattern::Single };
         // 20 mm down from the middle of the top edge: below the line, the line stays whole
         let s = Sheet { margin_mm: 5.0, line: Some(line.clone()), headline: Some(hl(20.0)), ..a4(None) };
@@ -560,6 +605,41 @@ mod tests {
         let page = render(&s2, 0, 1.0, |_| None);
         assert_eq!(page.get_pixel((tr2.x - 10.0) as u32, 82), &Rgb([255, 255, 255]), "gap before the text");
         assert_eq!(page.get_pixel(200, 82), &Rgb([0, 0, 0]), "line goes on beside it");
+        // the space below a top headline keeps the stills away
+        let mut s3 = s.clone();
+        s3.headline = Some(Headline { pad_mm: [0.0, 0.0, 30.0, 0.0], ..hl(20.0) });
+        assert!(s3.plan().area.y >= tr.y + tr.h + 300.0 - 1e-6);
+    }
+
+    #[test]
+    fn stills_flow_around_a_headline_over_them() {
+        let Some(face) = face() else { return };
+        let hl = Headline {
+            text: "Rough Cut 3".into(),
+            face,
+            size_pt: 40.0,
+            color: [0, 0, 0],
+            align: Align::Center,
+            valign: VAlign::Middle,
+            dx_mm: 0.0,
+            dy_mm: 0.0,
+            pad_mm: [3.0; 4],
+            wrap: true,
+        };
+        let s = Sheet { headline: Some(hl.clone()), ..a4(Some(3)) };
+        let g = s.grid(12, 16.0 / 9.0);
+        // the middle cells are kept free, so the grid has more rows and still holds all 12
+        assert!(g.rows > 4 && g.slots() >= 12, "{g:?}");
+        let (r, _, _) = s.plan().text.unwrap();
+        let o = Rect { x: r.x - 30.0, y: r.y - 30.0, w: r.w + 60.0, h: r.h + 60.0 };
+        for i in 0..12 {
+            let (x, y, w, h) = g.cell(i);
+            let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
+            assert!(!(x < o.x + o.w && o.x < x + w && y < o.y + o.h && o.y < y + h), "still {i} under the headline");
+        }
+        // without flowing the stills lie under it, in the usual 3 × 4
+        let plain = Sheet { headline: Some(Headline { wrap: false, ..hl }), ..a4(Some(3)) };
+        assert_eq!(plain.grid(12, 16.0 / 9.0).rows, 4);
     }
 
     #[test]

@@ -296,8 +296,8 @@ msgstr "Film beginnt bei"
 msgid "Film ends at"
 msgstr "Film endet bei"
 
-msgid "Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles. Empty: from the start, to the end."
-msgstr "Timecode des Masterfiles, z. B. 01:01:30:00, um Vorspann und Abspann auszulassen. Leer: vom Anfang, bis zum Ende."
+msgid "Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."
+msgstr "Timecode des Masterfiles, z. B. 01:01:30:00, um Vor- und Abspann auszulassen; die Shots folgen sofort. Klick auf Stunden, Minuten, Sekunden oder Frames ändert sie, Doppelklick den ganzen Timecode. Leer: vom Anfang, bis zum Ende."
 
 msgid "Detect cuts"
 msgstr "Schnitte erkennen"
@@ -436,6 +436,30 @@ msgstr "Raster alle"
 
 msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."
 msgstr "Das Raster ist nur in der Vorschau zu sehen, es wird nicht exportiert. Es liegt über der Seite oder über der Fläche innerhalb der Schnittmarken; die kräftigeren Linien sind ihre Mitte. Die kleinen Striche am Rahmen der Headline werden grün, wenn die Mitte des Textes auf einer Rasterlinie liegt."
+
+msgid "Space above · below"
+msgstr "Abstand oben · unten"
+
+msgid "Space left · right"
+msgstr "Abstand links · rechts"
+
+msgid "Space above"
+msgstr "Abstand oben"
+
+msgid "Space below"
+msgstr "Abstand unten"
+
+msgid "Space left"
+msgstr "Abstand links"
+
+msgid "Space right"
+msgstr "Abstand rechts"
+
+msgid "Stills around the headline"
+msgstr "Stills um die Headline"
+
+msgid "The space is what the stills keep from the headline. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the headline, leave its place free and go on in the next cells."
+msgstr "Der Abstand ist das, was die Stills zur Headline frei lassen. Oben oder unten bleiben sie darunter oder darüber; über den Stills liegen sie unter ihr – oder lassen mit „Stills um die Headline“ ihren Platz frei und laufen in den nächsten Zellen weiter."
 
 msgid "Crop marks"
 msgstr "Schnittmarken"

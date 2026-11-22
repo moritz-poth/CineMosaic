@@ -60,7 +60,7 @@ pub fn read_cut_list(path: &Path, rate: Rate) -> Result<Timeline, String> {
 /// The stills that fill `sheet`'s grid for stills of width/height `aspect` (see `timeline::fill`).
 pub fn picks(shots: &[Shot], sheet: &layout::Sheet, aspect: f64) -> Vec<Pick> {
     let g = sheet.grid(shots.len(), aspect);
-    timeline::fill(shots, (g.cols * g.rows) as usize)
+    timeline::fill(shots, g.slots())
 }
 
 /// Each picked still in master mode: its record frame minus the master's start timecode.

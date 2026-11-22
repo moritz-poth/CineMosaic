@@ -37,6 +37,8 @@ pub struct Project {
     pub volumes_off: Vec<PathBuf>,
     pub look: serde_json::Value,
     pub headline: String,
+    /// master mode: where the film starts and ends ("HH:MM:SS:FF" of the master, "" = no limit)
+    pub film: (String, String),
     /// the cut as read when saved
     pub name: String,
     pub rate: Rate,
@@ -94,6 +96,8 @@ struct FileProject {
     volumes_off: Vec<PathBuf>,
     look: serde_json::Value,
     headline: String,
+    #[serde(default)]
+    film: (String, String),
     name: String,
     rate: (u32, u32),
     sequences: usize,
@@ -155,6 +159,7 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         volumes_off: p.volumes_off.clone(),
         look: p.look.clone(),
         headline: p.headline.clone(),
+        film: p.film.clone(),
         name: p.name.clone(),
         rate: (p.rate.num, p.rate.den),
         sequences: p.sequences,
@@ -236,6 +241,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
         volumes_off: fp.volumes_off,
         look: fp.look,
         headline: fp.headline,
+        film: fp.film,
         name: fp.name,
         rate: Rate { num: fp.rate.0.max(1), den: fp.rate.1.max(1) },
         sequences: fp.sequences,
@@ -269,6 +275,7 @@ mod tests {
             volumes_off: vec![],
             look: serde_json::json!({"margin": "10"}),
             headline: "Title".into(),
+            film: ("01:00:10:00".into(), String::new()),
             name: "Cut".into(),
             rate: Rate { num: 25, den: 1 },
             sequences: 1,
