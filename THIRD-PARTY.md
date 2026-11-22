@@ -6,3 +6,7 @@
 - JetBrains Mono (SIL Open Font License 1.1, `ui/fonts/OFL.txt`).
 - cfb (MIT), image, png, tiff, roxmltree, flate2 (MIT/Apache-2.0) crates.
 - Slint (GPL-3.0 edition), FFmpeg (called as an external program).
+
+## Example pictures
+
+The screenshots and example sheets in `docs/images/` show stills from *Tears of Steel* – (CC) Blender Foundation | mango.blender.org, licensed under the Creative Commons Attribution 3.0 licence (https://creativecommons.org/licenses/by/3.0/). The stills were scaled and laid out on sheets by CineMosaic.

@@ -4,7 +4,27 @@
 
 <p align="center">☕ If you use CineMosaic and like it, I would be glad if you <a href="https://buymeacoffee.com/moritzpoth">bought me a coffee</a>.</p>
 
-Takes one still from the middle of every shot of a cut and lays them out on one sheet – a contact sheet of the whole film, to print or to send.
+For every clip in the timeline CineMosaic takes a still and sets them one after the other. What comes out is a small work of art of its own – a poster, a social media post or the cover of a premiere invitation.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/app-dark.jpg">
+  <img src="docs/images/app-light.jpg" alt="CineMosaic with a poster of Tears of Steel: settings on the left, the sheet on the right">
+</picture>
+
+## Examples
+
+All three from the same film – 132 shots, cuts found by CineMosaic in the picture, opening and end titles left out.
+
+<p align="center">
+  <img src="docs/images/example-poster.jpg" width="32%" alt="Poster, DIN A2 portrait, headline at the top, frame line">
+  <img src="docs/images/example-instagram.jpg" width="32%" alt="Instagram post 1080 × 1350, the stills flow around the title in the middle and fill the page">
+</p>
+<p align="center">
+  <img src="docs/images/example-invitation.jpg" width="65%" alt="Premiere invitation, DIN A6 landscape, triple frame line, title at the bottom">
+</p>
+
+Poster (DIN A2) · Instagram post (1080 × 1350) · cover of a premiere invitation (DIN A6).
+Stills from *Tears of Steel* – (CC) Blender Foundation | [mango.blender.org](https://mango.blender.org), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
 
 ## What it does
 
