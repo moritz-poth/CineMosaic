@@ -10,8 +10,11 @@ Takes one still from the middle of every shot of a cut and lays them out on one 
 
 - **Two sources.** A Media Composer bin with the Avid MediaFiles of your volumes – CineMosaic follows every shot of the sequence through effects, motion effects, multicam and nests to its media file, also into other bins of the project and to AMA-linked files. Or a master file of the cut with its cut list: EDL (CMX3600), Final Cut Pro 7 XML, FCPXML or AAF.
 - **What you see.** At every moment the topmost video track with a clip counts; filler lets the tracks below show through. A clip partly covered from above becomes two shots. The still is the middle frame of each shot. Cells left over in the last row are filled with a second still from the longest shots (after the first and the second third).
-- **Picture format.** Black bars are cut off for 4:3, 1.66, 16:9, 1.85, 2.00, 2.35, 2.39 or any format of your own.
-- **The sheet.** DIN A0–A6 or your own size, portrait or landscape, resolution in dpi, margin and gap in mm, columns automatic (largest stills) or fixed. A live preview shows the sheet as you set it up.
+- **No cut list?** CineMosaic can find the cuts in the picture of the master file. Film start and end timecodes leave out opening and end titles – change them any time, the shots follow at once.
+- **Picture format.** Black bars are cut off for 4:3, 1.66, 16:9, 1.85, 1.90, 2:1, 2.35, 2.39, 2.40 or any format of your own. The stills' own format is named as the film world does (DCI Scope 2048 × 858 is 2.39:1).
+- **The sheet.** DIN A0–A6, social media sizes or your own size, portrait or landscape, resolution in dpi; margin (also negative, to fill the page to its edges) and gap in pixels; columns automatic (largest stills) or fixed; crop marks. A live preview shows the sheet as you set it up.
+- **Frame line and headline.** A frame line in six patterns, a headline in any font of your Mac at one of nine anchors, dragged in the preview with a grid to place it exactly; the stills keep a space of your choice around it or flow around it. Five colour presets each, picked with the macOS colour window.
+- **Presets.** Keep the look of a sheet and use it again for the next cut.
 - **Saving.** PNG, TIFF and JPEG with the resolution in the file, PDF in the paper size.
 - **Projects.** Save the whole sheet with its stills as a project, open it again later – also without the source – and when the cut has changed, grab only the new or changed shots.
 
@@ -21,13 +24,13 @@ Bins are read with a small reader of our own (`src/avb.rs`), AAF files with `src
 
 ## Install
 
-Requires macOS 11 or later, Apple Silicon or Intel. Download `CineMosaic-<version>.zip` from [Releases](../../releases), unzip, move the app to Applications. It is not signed with a paid Apple certificate: on first launch open **System Settings → Privacy & Security** and click **Open Anyway** (once). When macOS asks whether CineMosaic may access files on removable or network volumes, allow it.
+Requires macOS 11 or later, Apple Silicon or Intel. Download `CineMosaic-<version>.dmg` from [Releases](../../releases), open it and drag CineMosaic onto Applications. It is not signed with a paid Apple certificate: on first launch open **System Settings → Privacy & Security** and click **Open Anyway** (once). When macOS asks whether CineMosaic may access files on removable or network volumes, allow it.
 
 ## Build
 
 ```
 cargo test
-scripts/build-mac-app.sh     # → dist/CineMosaic.app (universal) and a zip
+scripts/build-mac-app.sh     # → dist/CineMosaic.app (universal), the zip for the updater and the DMG
 cargo run --release --bin cinemosaic -- MASTER CUTLIST OUT.pdf [--paper A3 --landscape --dpi 300 --picture 2.39]
 cargo run --release --bin cinemosaic -- --bin BIN.avb VOLUME[:VOLUME] OUT.png [--seq N]
 ```
