@@ -1,6 +1,6 @@
 [package]
 name = "cinemosaic"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "One still from the middle of every shot of a cut, laid out on one sheet"
