@@ -559,3 +559,6 @@ msgstr "El ancla es el punto de la hoja del que cuelga el título; X e Y lo muev
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Arrastra a la izquierda o a la derecha en un campo para cambiar el valor; haz clic para escribirlo."
+
+msgid "Background"
+msgstr "Fondo"

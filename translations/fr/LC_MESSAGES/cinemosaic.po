@@ -559,3 +559,6 @@ msgstr "L’ancre est le point de la planche auquel le titre est accroché ; X e
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Faites glisser à gauche ou à droite dans un champ pour changer la valeur ; cliquez pour la saisir."
+
+msgid "Background"
+msgstr "Fond"

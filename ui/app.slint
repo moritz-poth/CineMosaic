@@ -128,15 +128,17 @@ component CheckButton {
 component Switch inherits Rectangle {
     in property <bool> on;
     in property <string> label;
+    in property <bool> enabled: true;
     callback toggled;
     width: 34px;
+    opacity: root.enabled ? 1 : 0.5;
     height: 20px;
     border-radius: 10px;
     background: root.on ? Theme.primary : Theme.line;
     accessible-role: switch;
     accessible-label: root.label;
     accessible-checked: root.on;
-    accessible-action-default => { root.toggled(); }
+    accessible-action-default => { if root.enabled { root.toggled(); } }
     Rectangle {
         x: root.on ? parent.width - self.width - 2px : 2px;
         y: 2px;
@@ -147,6 +149,7 @@ component Switch inherits Rectangle {
         animate x { duration: 150ms; easing: ease-out; }
     }
     TouchArea {
+        enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.toggled(); }
     }
@@ -159,6 +162,7 @@ component MenuButton {
     in property <string> label;
     // long values are cut off with "…" (the sequence list)
     in property <length> text-max: 1000px;
+    in property <bool> enabled: true;
     callback clicked;
     height: 26px;
     min-width: row.preferred-width;
@@ -167,7 +171,7 @@ component MenuButton {
     accessible-role: combobox;
     accessible-label: root.label;
     accessible-value: root.text;
-    accessible-action-default => { root.clicked(); }
+    accessible-action-default => { if root.enabled { root.clicked(); } }
     Rectangle {
         border-radius: 6px;
         border-width: 1px;
@@ -178,13 +182,14 @@ component MenuButton {
         padding-left: 12px;
         padding-right: 12px;
         spacing: 6px;
-        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: Theme.text; overflow: elide; max-width: root.text-max; }
+        Text { text: root.text; font-size: 12px; vertical-alignment: center; color: root.enabled ? Theme.text : Theme.disabled; overflow: elide; max-width: root.text-max; }
         VerticalLayout {
             alignment: center;
-            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: Theme.text; stroke-width: 1.5px; }
+            Path { width: 8px; height: 5px; commands: "M 0 0 L 4 4 L 8 0"; stroke: root.enabled ? Theme.text : Theme.disabled; stroke-width: 1.5px; }
         }
     }
     touch := TouchArea {
+        enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
@@ -195,6 +200,7 @@ component Dropdown {
     in property <[string]> items;
     in property <int> current;
     in property <string> label;
+    in property <bool> enabled: true;
     callback selected(int);
     min-width: b.min-width;
     max-width: b.max-width;
@@ -208,7 +214,7 @@ component Dropdown {
                 activated => { root.selected(i); }
             }
         }
-        b := MenuButton { text: root.items[root.current]; label: root.label; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
+        b := MenuButton { text: root.items[root.current]; label: root.label; enabled: root.enabled; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
     }
 }
 
@@ -218,6 +224,7 @@ component CheckDropdown {
     in property <[MenuChoice]> entries;
     in property <string> text;
     in property <string> label;
+    in property <bool> enabled: true;
     callback selected(int);
     min-width: b.min-width;
     max-width: b.max-width;
@@ -232,7 +239,7 @@ component CheckDropdown {
                 activated => { root.selected(i); }
             }
         }
-        b := MenuButton { text: root.text; label: root.label; text-max: 220px; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
+        b := MenuButton { text: root.text; label: root.label; text-max: 220px; enabled: root.enabled; clicked => { menu.show({ x: 0, y: root.height + 4px }); } }
     }
 }
 
@@ -369,6 +376,7 @@ export struct TcState {
 component TcField inherits Rectangle {
     in-out property <string> text;
     in property <string> label;
+    in property <bool> enabled: true;
     pure callback edit(TcState, string, bool) -> TcState;
     callback paste(TcState) -> TcState;
     pure callback parts(string) -> [string];
@@ -394,7 +402,9 @@ component TcField inherits Rectangle {
     accessible-role: text-input;
     accessible-label: root.label;
     accessible-value: root.text;
+    opacity: root.enabled ? 1 : 0.5;
     scope := FocusScope {
+        enabled: root.enabled;
         changed has-focus => {
             if self.has-focus {
                 // reached with Tab: everything chosen, as in a text field
@@ -425,6 +435,7 @@ component TcField inherits Rectangle {
         }
         // a click beside the digits: everything
         TouchArea {
+            enabled: root.enabled;
             mouse-cursor: MouseCursor.text;
             clicked => { root.choose(4); }
         }
@@ -453,6 +464,7 @@ component TcField inherits Rectangle {
                         horizontal-alignment: center;
                     }
                     TouchArea {
+                        enabled: root.enabled;
                         mouse-cursor: MouseCursor.text;
                         clicked => { root.choose(i); }
                         double-clicked => { root.choose(4); }
@@ -466,6 +478,7 @@ component TcField inherits Rectangle {
 // A chosen file: its name, and right-aligned a small × that removes it from the list
 component FileRow inherits HorizontalLayout {
     in property <string> text;
+    in property <bool> enabled: true;
     callback removed();
     height: 22px;
     spacing: 8px;
@@ -477,9 +490,9 @@ component FileRow inherits HorizontalLayout {
         background: x.pressed ? Theme.text.with-alpha(0.14) : x.has-hover ? Theme.text.with-alpha(0.07) : transparent;
         accessible-role: button;
         accessible-label: @tr("Remove {}", root.text);
-        accessible-action-default => { root.removed(); }
-        Text { text: "×"; font-size: 14px; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
-        x := TouchArea { mouse-cursor: pointer; clicked => { root.removed(); } }
+        accessible-action-default => { if root.enabled { root.removed(); } }
+        Text { text: "×"; font-size: 14px; color: root.enabled ? Theme.muted : Theme.disabled; horizontal-alignment: center; vertical-alignment: center; }
+        x := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.removed(); } }
     }
 }
 
@@ -1891,6 +1904,11 @@ export component AppWindow inherits SheetWindow {
     in property <[Swatch]> head-palette;
     in-out property <int> line-slot;
     in-out property <int> head-slot;
+    // sheet background (2): the page behind the stills
+    in-out property <string> bg-color: "#ffffff";
+    in property <color> bg-swatch: white;
+    in property <[Swatch]> bg-palette;
+    in-out property <int> bg-slot;
     callback color-swatch(int, int);
     callback color-panel(int);
     callback color-typed(int);
@@ -1987,6 +2005,7 @@ export component AppWindow inherits SheetWindow {
                                         label: @tr("Source");
                                         items: [@tr("Master file + cut list"), @tr("Media Composer bin")];
                                         current: root.mode;
+                                        enabled: root.state != 1;
                                         selected(i) => { root.mode = i; root.mode-chosen(i); }
                                     }
                                 }
@@ -1996,12 +2015,12 @@ export component AppWindow inherits SheetWindow {
                                         text: @tr("Master files");
                                         CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-master(); } }
                                     }
-                                    for name[i] in root.master-names: FileRow { text: name; removed => { root.remove-master(i); } }
+                                    for name[i] in root.master-names: FileRow { text: name; enabled: root.state != 1; removed => { root.remove-master(i); } }
                                     Row {
                                         text: @tr("Cut lists");
                                         CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-list(); } }
                                     }
-                                    for name[i] in root.list-names: FileRow { text: name; removed => { root.remove-list(i); } }
+                                    for name[i] in root.list-names: FileRow { text: name; enabled: root.state != 1; removed => { root.remove-list(i); } }
                                     Para { text: @tr("A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."); }
                                     // always there; usable while a master has neither a cut list nor detected cuts
                                     VerticalLayout {
@@ -2016,7 +2035,7 @@ export component AppWindow inherits SheetWindow {
                                         Row {
                                             text: @tr("Film starts at");
                                             TcField {
-                                                text <=> root.detect-from; label: @tr("Film starts at");
+                                                text <=> root.detect-from; label: @tr("Film starts at"); enabled: root.state != 1;
                                                 edit(s, k, m) => { root.tc-edit(s, k, m) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
                                                 done => { root.film-changed(); }
                                             }
@@ -2024,7 +2043,7 @@ export component AppWindow inherits SheetWindow {
                                         Row {
                                             text: @tr("Film ends at");
                                             TcField {
-                                                text <=> root.detect-to; label: @tr("Film ends at");
+                                                text <=> root.detect-to; label: @tr("Film ends at"); enabled: root.state != 1;
                                                 edit(s, k, m) => { root.tc-edit(s, k, m) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
                                                 done => { root.film-changed(); }
                                             }
@@ -2046,6 +2065,7 @@ export component AppWindow inherits SheetWindow {
                                             label: @tr("Sequence");
                                             entries: root.sequences;
                                             text: root.sequence-label;
+                                            enabled: root.state != 1;
                                             selected(i) => { root.toggle-sequence(i); }
                                         }
                                     }
@@ -2062,7 +2082,7 @@ export component AppWindow inherits SheetWindow {
                                                 Text { text: v.name; font-size: 12px; color: Theme.muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                                                 VerticalLayout {
                                                     alignment: center;
-                                                    Switch { on: v.on; label: v.name; toggled => { root.toggle-volume(i); } }
+                                                    Switch { on: v.on; label: v.name; enabled: root.state != 1; toggled => { root.toggle-volume(i); } }
                                                 }
                                             }
                                         }
@@ -2176,6 +2196,13 @@ export component AppWindow inherits SheetWindow {
                                         scrub: 0.5; step: 1;
                                         edited => { root.sheet-changed(); }
                                     }
+                                }
+                                ColorRow {
+                                    text: @tr("Background"); value <=> root.bg-color; shown: root.bg-swatch; invalid: root.invalid == "bg-color";
+                                    palette: root.bg-palette; slot: root.bg-slot;
+                                    edited => { root.color-typed(2); root.sheet-changed(); }
+                                    swatch(i) => { root.color-swatch(2, i); }
+                                    panel => { root.color-panel(2); }
                                 }
                                 Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
                                 Row {
@@ -2482,7 +2509,7 @@ export component AppWindow inherits SheetWindow {
                 height: desk.fit-h * root.zoom;
                 x: (desk.width - self.width) / 2 + root.pan-x;
                 y: (desk.height - self.height) / 2 + root.pan-y;
-                background: white;
+                background: root.bg-swatch;
                 drop-shadow-blur: 18px;
                 drop-shadow-color: #00000059;
                 drop-shadow-offset-y: 4px;

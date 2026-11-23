@@ -62,7 +62,7 @@ pub fn preset_json(app: &AppWindow) -> serde_json::Value {
         "px-units": app.get_px_units(), "paper": app.get_paper(), "custom-w": app.get_custom_w().as_str(), "custom-h": app.get_custom_h().as_str(),
         "landscape": app.get_landscape(), "dpi": app.get_dpi().as_str(), "margin": app.get_margin().as_str(),
         "gap": app.get_gap().as_str(), "auto-cols": app.get_auto_cols(), "cols": app.get_cols().as_str(),
-        "picture": app.get_picture(), "aspect": app.get_aspect().as_str(), "trim": app.get_trim(),
+        "picture": app.get_picture(), "aspect": app.get_aspect().as_str(), "trim": app.get_trim(), "bg-color": app.get_bg_color().as_str(),
         "line-on": app.get_line_on(), "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
         "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
         "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
@@ -101,6 +101,7 @@ pub fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     }
     show_picture(app);
     boolean("trim", &|b| app.set_trim(b));
+    text("bg-color", &|s| app.set_bg_color(s));
     boolean("line-on", &|b| app.set_line_on(b));
     text("line-width", &|s| app.set_line_width(s));
     text("line-inset", &|s| app.set_line_inset(s));

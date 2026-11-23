@@ -559,3 +559,6 @@ msgstr "Der Anker ist der Punkt des Bogens, an dem die Headline hängt; X und Y 
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Im Feld nach links oder rechts ziehen ändert den Wert; Klicken zum Tippen."
+
+msgid "Background"
+msgstr "Hintergrund"

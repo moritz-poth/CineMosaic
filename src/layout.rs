@@ -108,11 +108,13 @@ pub struct Sheet {
     pub trim: Option<f64>,
     pub line: Option<Line>,
     pub headline: Option<Headline>,
+    /// colour of the page behind the stills; with crop marks it fills the trim area plus 3 mm bleed
+    pub background: [u8; 3],
 }
 
 impl Default for Sheet {
     fn default() -> Self {
-        Sheet { width_mm: 297.0, height_mm: 210.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, trim: None, line: None, headline: None }
+        Sheet { width_mm: 297.0, height_mm: 210.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, trim: None, line: None, headline: None, background: [255, 255, 255] }
     }
 }
 
@@ -480,8 +482,13 @@ pub fn render_tiles(sheet: &Sheet, n: usize, aspect: f64, tile: impl Fn(usize, u
 
 fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32, u32) -> Option<RgbImage>) -> RgbImage {
     let (w, h) = sheet.size_px();
-    let mut page = RgbImage::from_pixel(w, h, Rgb([255, 255, 255]));
+    let mut page = RgbImage::from_pixel(w, h, Rgb(if sheet.trim.is_some() { [255, 255, 255] } else { sheet.background }));
     let plan = sheet.plan();
+    if sheet.trim.is_some() {
+        // bleed up to where the crop marks start, so a cut a little off the line shows no white edge
+        let (r, b) = (plan.trim, sheet.px(MARK_OFFSET));
+        fill(&mut page, r.x - b, r.y - b, r.x + r.w + b, r.y + r.h + b, sheet.background);
+    }
     for i in 0..n {
         let (x, y, cw, ch) = grid.cell(i);
         let tile = tile(i, cw, ch).unwrap_or_else(|| RgbImage::from_pixel(cw, ch, Rgb([200, 200, 200])));
@@ -562,6 +569,18 @@ mod tests {
         assert_eq!(c.dimensions(), (1920, 803));
         assert!(c.pixels().all(|p| p == &Rgb([255, 0, 0])));
         assert_eq!(crop(&img, 4.0 / 3.0).dimensions(), (1440, 1080));
+    }
+
+    #[test]
+    fn background_fills_the_page_or_trim_plus_bleed() {
+        let blue = [20, 40, 200];
+        let page = render(&Sheet { background: blue, ..a4(None) }, 0, 1.5, |_| None);
+        assert_eq!(page.get_pixel(1, 1), &Rgb(blue));
+        let s = Sheet { background: blue, trim: Some(2.0), ..a4(None) };
+        let (page, r) = (render(&s, 0, 1.5, |_| None), s.plan().trim);
+        // 1 mm (10 px) outside the trim edge: bleed; 5 mm out: white paper beside the crop marks
+        assert_eq!(page.get_pixel((r.x - 10.0) as u32, (r.y + r.h / 2.0) as u32), &Rgb(blue));
+        assert_eq!(page.get_pixel((r.x - 50.0).max(0.0) as u32, (r.y + r.h / 2.0) as u32), &Rgb([255, 255, 255]));
     }
 
     #[test]

@@ -45,7 +45,7 @@ struct State {
     /// can need stills not grabbed yet: they stay grey until "Grab stills" fetches just those
     stills: HashMap<Pick, Result<PathBuf, String>>,
     thumbs: Arc<HashMap<Pick, RgbImage>>,
-    /// grabs since the source was chosen: each writes into its own folder
+    /// grabs since the window opened (never reset): each writes into its own folder
     grabs: usize,
     /// frames grabbed so far by media file and frame: a changed cut reuses them instead of grabbing again
     done: HashMap<(PathBuf, i64), PathBuf>,
@@ -161,12 +161,14 @@ struct Settings {
     betas: bool,
     /// not saved; shared with the threads that check and install
     update: Arc<Mutex<Update>>,
-    /// the five colour presets of the frame line [0] and the headline [1], "#rrggbb"
-    palettes: [Vec<String>; 2],
+    /// the five colour presets of the frame line [0], the headline [1] and the sheet background [2], "#rrggbb"
+    palettes: [Vec<String>; 3],
 }
 
 /// Colour presets before the user changes them: black, dark grey, grey, white, red.
 const PALETTE: [&str; 5] = ["#000000", "#3c4146", "#8a8f94", "#ffffff", "#b3261e"];
+/// Background presets before the user changes them: white, warm paper, light grey, dark grey, black.
+const BG_PALETTE: [&str; 5] = ["#ffffff", "#f4f0e6", "#d9dadb", "#3c4146", "#000000"];
 
 /// [r, g, b] → "#rrggbb"
 fn hex_text(c: [u8; 3]) -> String {
@@ -214,11 +216,11 @@ fn load_settings() -> Settings {
     let tab = lines.next().and_then(|l| l.parse().ok()).filter(|t| matches!(t, 0..=2)).unwrap_or(0);
     let betas = lines.next() == Some("betas");
     // five valid colours, else the defaults (settings from before 2026-11-22 have none)
-    let mut palette = || {
+    let mut palette = |default: [&str; 5]| {
         let p: Vec<String> = lines.next().unwrap_or("").split(',').filter_map(hex_color).map(hex_text).collect();
-        if p.len() == 5 { p } else { PALETTE.map(String::from).to_vec() }
+        if p.len() == 5 { p } else { default.map(String::from).to_vec() }
     };
-    let palettes = [palette(), palette()];
+    let palettes = [palette(PALETTE), palette(PALETTE), palette(BG_PALETTE)];
     Settings { language, dark, tab, betas, update: Arc::default(), palettes }
 }
 
@@ -228,7 +230,16 @@ fn save_settings(s: &Settings) {
         let _ = std::fs::create_dir_all(p.parent().unwrap());
         let _ = std::fs::write(
             p,
-            format!("{}\n{}\n{}\n{}\n{}\n{}\n", s.language, if s.dark { "dark" } else { "light" }, s.tab, if s.betas { "betas" } else { "final" }, s.palettes[0].join(","), s.palettes[1].join(",")),
+            format!(
+                "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+                s.language,
+                if s.dark { "dark" } else { "light" },
+                s.tab,
+                if s.betas { "betas" } else { "final" },
+                s.palettes[0].join(","),
+                s.palettes[1].join(","),
+                s.palettes[2].join(",")
+            ),
         );
     }
 }
@@ -766,6 +777,21 @@ fn show_palettes(app: &AppWindow, s: &Settings) {
     };
     app.set_line_palette(swatches(0));
     app.set_head_palette(swatches(1));
+    app.set_bg_palette(swatches(2));
+}
+
+/// Colour of palette `k` (0 frame line, 1 headline, 2 background) as typed.
+fn color_of(app: &AppWindow, k: i32) -> SharedString {
+    [AppWindow::get_line_color, AppWindow::get_head_color, AppWindow::get_bg_color][k.clamp(0, 2) as usize](app)
+}
+
+fn set_color(app: &AppWindow, k: i32, v: SharedString) {
+    [AppWindow::set_line_color, AppWindow::set_head_color, AppWindow::set_bg_color][k.clamp(0, 2) as usize](app, v)
+}
+
+/// The chosen preset of palette `k` (-1: none).
+fn slot_of(app: &AppWindow, k: i32) -> i32 {
+    [AppWindow::get_line_slot, AppWindow::get_head_slot, AppWindow::get_bg_slot][k.clamp(0, 2) as usize](app)
 }
 
 /// The chosen preset follows the colour (a preset or project brings its own): the preset with this colour, or none.
@@ -777,6 +803,7 @@ fn match_slots(app: &AppWindow) {
     };
     app.set_line_slot(slot(app.get_line_palette(), app.get_line_color()));
     app.set_head_slot(slot(app.get_head_palette(), app.get_head_color()));
+    app.set_bg_slot(slot(app.get_bg_palette(), app.get_bg_color()));
 }
 
 /// Preset `slot` of palette `k` gets colour `c`; every window shows it. `save`: write the settings now (the colour
@@ -803,6 +830,9 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
     // frame line and headline place in px of the sheet, whatever the unit of the Sheet tab
     let per = 25.4 / sheet.dpi;
     sheet.trim = app.get_trim().then_some(aspect);
+    let bg = hex_color(&app.get_bg_color()).ok_or("bg-color")?;
+    app.set_bg_swatch(slint::Color::from_rgb_u8(bg[0], bg[1], bg[2]));
+    sheet.background = bg;
     let line_color = hex_color(&app.get_line_color());
     if let Some([r, g, b]) = line_color {
         app.set_line_swatch(slint::Color::from_rgb_u8(r, g, b));
@@ -1145,7 +1175,8 @@ fn start_renderer(weak: slint::Weak<AppWindow>, latest: Arc<AtomicUsize>) -> std
 fn clear_source(app: &AppWindow, st: &mut State) {
     st.stills.clear();
     st.thumbs = Arc::default();
-    st.grabs = 0;
+    // a grab or cut detection still running belongs to the old source
+    st.gate.cancel.store(true, Ordering::Relaxed);
     st.shots.clear();
     st.timeline = None;
     st.cut = None;
@@ -1358,6 +1389,7 @@ fn grab(app: &AppWindow) {
             st.still_aspect = None;
             st.done.clear();
         }
+        st.gate.cancel.store(true, Ordering::Relaxed);
         st.gate = Arc::default();
         st.grabs += 1;
         let volumes: Vec<PathBuf> = st.volumes.iter().filter(|v| v.1).map(|v| v.0.clone()).collect();
@@ -1399,7 +1431,12 @@ fn grab(app: &AppWindow) {
             }
         };
         if fresh {
-            let _ = std::fs::remove_dir_all(&dir.0); // stills of an earlier run
+            // stills of earlier runs; never this run's folder (an older, cancelled run may still be writing to its own)
+            for e in std::fs::read_dir(&dir.0).into_iter().flatten().flatten() {
+                if e.path() != dir.1 {
+                    let _ = std::fs::remove_dir_all(e.path());
+                }
+            }
         }
         let start = Instant::now();
         let progress = |done: usize, total: usize| {
@@ -1434,7 +1471,13 @@ fn grab(app: &AppWindow) {
         let weak = weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(app) = weak.upgrade() else { return };
-            match (stills, thumbs) {
+            // a newer run took over (new gate): it owns the window, this result is stale
+            if !with_state(&app, |st| Arc::ptr_eq(&gate, &st.borrow().gate)) {
+                return;
+            }
+            // cancelled, also by a new source, even if the stills were all there just before
+            let result = if gate.cancel.load(Ordering::Relaxed) { (None, None) } else { (stills, thumbs) };
+            match result {
                 (Some(stills), Some(Some(thumbs))) => {
                     let failed: Vec<String> = wanted
                         .iter()
@@ -1483,6 +1526,7 @@ fn detect_cuts(app: &AppWindow) {
             .filter(|(m, _)| !st.lists.iter().any(|l| stem(l) == stem(m)) && !st.detected.iter().any(|d| &d.0 == m))
             .cloned()
             .collect();
+        st.gate.cancel.store(true, Ordering::Relaxed);
         st.gate = Arc::default();
         (todo, st.gate.clone())
     });
@@ -1923,6 +1967,7 @@ fn open_project(app: &AppWindow, path: PathBuf) {
         st.carry = None;
         st.project = Some(path.clone());
         st.project_saved = None;
+        st.gate.cancel.store(true, Ordering::Relaxed);
         st.gate = Arc::default();
         st.gate.clone()
     });
@@ -2631,15 +2676,10 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move |k, i| {
             let Some(app) = weak.upgrade() else { return };
-            let pal = if k == 0 { app.get_line_palette() } else { app.get_head_palette() };
+            let pal = [app.get_line_palette(), app.get_head_palette(), app.get_bg_palette()][k.clamp(0, 2) as usize].clone();
             let Some(sw) = slint::Model::row_data(&pal, i as usize) else { return };
-            if k == 0 {
-                app.set_line_slot(i);
-                app.set_line_color(sw.hex);
-            } else {
-                app.set_head_slot(i);
-                app.set_head_color(sw.hex);
-            }
+            [AppWindow::set_line_slot, AppWindow::set_head_slot, AppWindow::set_bg_slot][k.clamp(0, 2) as usize](&app, i);
+            set_color(&app, k, sw.hex);
             refresh(&app);
         }
     });
@@ -2649,17 +2689,16 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         let (weak, ctx) = (app.as_weak(), ctx.clone());
         move |k| {
             let Some(app) = weak.upgrade() else { return };
-            let value = if k == 0 { app.get_line_color() } else { app.get_head_color() };
+            let value = color_of(&app, k);
             let (weak, ctx, saver) = (weak.clone(), ctx.clone(), ctx.clone());
             color_panel::open(
                 hex_color(&value).unwrap_or([0, 0, 0]),
                 Rc::new(move |c| {
                     let Some(app) = weak.upgrade() else { return };
-                    let slot = if k == 0 { app.get_line_slot() } else { app.get_head_slot() };
-                    if let Ok(slot) = usize::try_from(slot) {
+                    if let Ok(slot) = usize::try_from(slot_of(&app, k)) {
                         set_palette_entry(&ctx.settings, k as usize, slot, c, false);
                     }
-                    if k == 0 { app.set_line_color(hex_text(c).into()) } else { app.set_head_color(hex_text(c).into()) }
+                    set_color(&app, k, hex_text(c).into());
                     refresh(&app);
                 }),
                 Rc::new(move || save_settings(&saver.settings.borrow())),
@@ -2671,8 +2710,7 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         let (weak, ctx) = (app.as_weak(), ctx.clone());
         move |k| {
             let Some(app) = weak.upgrade() else { return };
-            let (value, slot) = if k == 0 { (app.get_line_color(), app.get_line_slot()) } else { (app.get_head_color(), app.get_head_slot()) };
-            if let (Some(c), Ok(slot)) = (hex_color(&value), usize::try_from(slot)) {
+            if let (Some(c), Ok(slot)) = (hex_color(&color_of(&app, k)), usize::try_from(slot_of(&app, k))) {
                 set_palette_entry(&ctx.settings, k as usize, slot, c, true);
             }
         }
