@@ -1014,11 +1014,16 @@ fn read_all(app: &AppWindow) -> Result<(layout::Sheet, Option<f64>), &'static st
     Ok((sheet, picture))
 }
 
-/// The main picture of a photomosaic, at most 3000 px on its long side (more never shows in a tile or a light blend).
-fn set_mosaic_target(app: &AppWindow, img: RgbImage, name: String) {
+/// A main picture at most 3000 px on its long side (more never shows in a tile or a light blend), never 0 px.
+fn mosaic_size(img: RgbImage) -> RgbImage {
     let (w, h) = img.dimensions();
-    let s = (3000.0 / w.max(h) as f64).min(1.0);
-    let img = if s < 1.0 { image::imageops::resize(&img, (w as f64 * s) as u32, (h as f64 * s) as u32, image::imageops::FilterType::Triangle) } else { img };
+    let s = (3000.0 / w.max(h).max(1) as f64).min(1.0);
+    if s < 1.0 { image::imageops::resize(&img, ((w as f64 * s) as u32).max(1), ((h as f64 * s) as u32).max(1), image::imageops::FilterType::Triangle) } else { img }
+}
+
+/// The main picture of a photomosaic.
+fn set_mosaic_target(app: &AppWindow, img: RgbImage, name: String) {
+    let img = mosaic_size(img);
     with_state(app, |st| st.borrow_mut().mosaic_target = Some(Arc::new(img)));
     app.set_mosaic_name(name.into());
     app.set_mosaic_on(true);
@@ -2181,7 +2186,7 @@ fn open_project(app: &AppWindow, path: PathBuf) {
             t.0 = words.clone();
         }
         st.text_open = 0;
-        st.mosaic_target = p.mosaic.clone().map(Arc::new);
+        st.mosaic_target = p.mosaic.clone().filter(|m| m.width() > 0 && m.height() > 0).map(|m| Arc::new(mosaic_size(m)));
     });
     load_open(app);
     app.set_mosaic_name(if p.mosaic.is_some() { tr(["Kept in the project", "Im Projekt gesichert", "Gardée dans le projet", "Guardada en el proyecto"]) } else { String::new() }.into());

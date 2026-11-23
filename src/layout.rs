@@ -252,10 +252,12 @@ pub struct Mosaic {
 }
 
 impl Mosaic {
-    /// Rows of tiles for stills of width/height `aspect`, so the tiles together have the main picture's format.
+    /// Rows of tiles for stills of width/height `aspect`, so the tiles together have the main picture's format
+    /// (at most 400: an extremely narrow picture from an odd file must not ask for millions of tiles).
     pub fn rows(&self, aspect: f64) -> u32 {
-        let t = self.target.width() as f64 / self.target.height().max(1) as f64;
-        ((self.cols as f64 * aspect / t).round() as u32).max(1)
+        let t = self.target.width().max(1) as f64 / self.target.height().max(1) as f64;
+        let rows = self.cols as f64 * aspect / t;
+        if rows.is_finite() { (rows.round() as u32).clamp(1, 400) } else { 1 }
     }
 }
 
