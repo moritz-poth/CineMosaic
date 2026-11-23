@@ -290,14 +290,14 @@ msgstr "{} entfernen"
 msgid "A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."
 msgstr "Eine Schnittliste gehört zum Masterfile mit dem gleichen Namen – Reel1.mov und Reel1.xml."
 
-msgid "Film starts at"
-msgstr "Film beginnt bei"
+msgid "Start and end under each master file: its timecode, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."
+msgstr "Start und Ende unter jedem Masterfile: sein Timecode, z. B. 01:01:30:00, um Vor- und Abspann wegzulassen; die Shots folgen sofort. Klick auf Stunden, Minuten, Sekunden oder Frames, um sie zu ändern, Doppelklick für den ganzen Timecode. Leer: vom Anfang, bis zum Ende."
 
-msgid "Film ends at"
-msgstr "Film endet bei"
+msgid "Start"
+msgstr "Start"
 
-msgid "Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."
-msgstr "Timecode des Masterfiles, z. B. 01:01:30:00, um Vor- und Abspann auszulassen; die Shots folgen sofort. Klick auf Stunden, Minuten, Sekunden oder Frames ändert sie, Doppelklick den ganzen Timecode. Leer: vom Anfang, bis zum Ende."
+msgid "End"
+msgstr "Ende"
 
 msgid "Detect cuts"
 msgstr "Schnitte erkennen"

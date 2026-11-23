@@ -290,14 +290,14 @@ msgstr "Retirer {}"
 msgid "A cut list belongs to the master file with the same name – Reel1.mov and Reel1.xml."
 msgstr "Une liste de montage va avec le fichier master du même nom – Reel1.mov et Reel1.xml."
 
-msgid "Film starts at"
-msgstr "Le film commence à"
+msgid "Start and end under each master file: its timecode, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."
+msgstr "Début et fin sous chaque fichier master : son timecode, p. ex. 01:01:30:00, pour laisser de côté le générique de début et de fin ; les plans suivent aussitôt. Cliquez sur les heures, minutes, secondes ou images pour les changer, double-cliquez pour tout le timecode. Vide : depuis le début, jusqu’à la fin."
 
-msgid "Film ends at"
-msgstr "Le film finit à"
+msgid "Start"
+msgstr "Début"
 
-msgid "Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."
-msgstr "Timecode du fichier master, p. ex. 01:01:30:00, pour laisser de côté les génériques ; les plans suivent aussitôt. Cliquez sur heures, minutes, secondes ou images pour les changer, double-cliquez pour tout le timecode. Vide : du début, jusqu'à la fin."
+msgid "End"
+msgstr "Fin"
 
 msgid "Detect cuts"
 msgstr "Détecter les coupes"

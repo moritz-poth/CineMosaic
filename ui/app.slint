@@ -11,6 +11,13 @@ export struct MenuChoice {
 }
 
 // a colour preset of the frame line or headline: as typed and as Rust read it
+// a master file in the Source tab with its film range (master timecode, "" = no limit)
+export struct MasterRow {
+    name: string,
+    from: string,
+    to: string,
+}
+
 export struct Swatch {
     hex: string,
     c: color,
@@ -1798,19 +1805,17 @@ export component AppWindow inherits SheetWindow {
     in property <string> sequence-label;
     in property <[VolumeRow]> volumes;
     // master mode: the files chosen (a master and the cut list with the same name belong together)
-    in property <[string]> master-names;
+    in property <[MasterRow]> masters-shown;
     in property <[string]> list-names;
     callback remove-master(int);
     callback remove-list(int);
     // a master without cut list: its cuts can be found in the picture
     in property <bool> can-detect;
-    // the film between these master timecodes (empty: from the start / to the end): titles stay out
-    in-out property <string> detect-from;
-    in-out property <string> detect-to;
     pure callback tc-edit(TcState, string, bool) -> TcState;
     callback tc-paste(TcState) -> TcState;
     pure callback tc-parts(string) -> [string];
-    callback film-changed();
+    // master i: the film between these master timecodes (empty: from the start / to the end), titles stay out
+    callback film-changed(int, string, string);
     callback detect-cuts();
     in property <string> source-info;
     in property <string> source-error;
@@ -2017,7 +2022,28 @@ export component AppWindow inherits SheetWindow {
                                         text: @tr("Master files");
                                         CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-master(); } }
                                     }
-                                    for name[i] in root.master-names: FileRow { text: name; enabled: root.state != 1; removed => { root.remove-master(i); } }
+                                    for m[i] in root.masters-shown: VerticalLayout {
+                                        FileRow { text: m.name; enabled: root.state != 1; removed => { root.remove-master(i); } }
+                                        // its own film range (user 2026-11-23)
+                                        HorizontalLayout {
+                                            padding-top: 2px;
+                                            padding-bottom: 6px;
+                                            spacing: 6px;
+                                            Text { text: @tr("Start"); font-size: 11px; color: Theme.muted; vertical-alignment: center; }
+                                            from := TcField {
+                                                text: m.from; label: @tr("Start") + " " + m.name; enabled: root.state != 1;
+                                                edit(s, k, mt) => { root.tc-edit(s, k, mt) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
+                                                done => { root.film-changed(i, from.text, to.text); }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Text { text: @tr("End"); font-size: 11px; color: Theme.muted; vertical-alignment: center; }
+                                            to := TcField {
+                                                text: m.to; label: @tr("End") + " " + m.name; enabled: root.state != 1;
+                                                edit(s, k, mt) => { root.tc-edit(s, k, mt) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
+                                                done => { root.film-changed(i, from.text, to.text); }
+                                            }
+                                        }
+                                    }
                                     Row {
                                         text: @tr("Cut lists");
                                         CheckButton { text: @tr("Add…"); small: true; enabled: root.state != 1; clicked => { root.pick-list(); } }
@@ -2034,23 +2060,7 @@ export component AppWindow inherits SheetWindow {
                                             CheckButton { text: @tr("Detect cuts"); small: true; enabled: root.state != 1 && root.can-detect; clicked => { root.detect-cuts(); } }
                                         }
                                         Para { text: @tr("No cut list? CineMosaic can find the cuts in the picture of the master files. This can take long: the whole film is analysed."); }
-                                        Row {
-                                            text: @tr("Film starts at");
-                                            TcField {
-                                                text <=> root.detect-from; label: @tr("Film starts at"); enabled: root.state != 1;
-                                                edit(s, k, m) => { root.tc-edit(s, k, m) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
-                                                done => { root.film-changed(); }
-                                            }
-                                        }
-                                        Row {
-                                            text: @tr("Film ends at");
-                                            TcField {
-                                                text <=> root.detect-to; label: @tr("Film ends at"); enabled: root.state != 1;
-                                                edit(s, k, m) => { root.tc-edit(s, k, m) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
-                                                done => { root.film-changed(); }
-                                            }
-                                        }
-                                        Para { text: @tr("Timecode of the master file, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."); }
+                                        Para { text: @tr("Start and end under each master file: its timecode, e.g. 01:01:30:00, to leave out opening and end titles; the shots follow at once. Click hours, minutes, seconds or frames to change them, double-click for the whole timecode. Empty: from the start, to the end."); }
                                     }
                                 }
                                 if root.mode == 1: VerticalLayout {

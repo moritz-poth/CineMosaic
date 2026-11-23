@@ -36,6 +36,8 @@ const THUMB_W: u32 = 480;
 struct State {
     /// master mode: master files and cut lists; a master and the list with the same file name belong together
     masters: Vec<(PathBuf, frames::VideoInfo)>,
+    /// film range per master file (start, end as typed; "" = no limit), kept when a master is removed and added again
+    films: HashMap<PathBuf, (String, String)>,
     lists: Vec<PathBuf>,
     /// masters without a cut list whose cuts were found in the picture: first frame of every shot, then the frame count
     detected: Vec<(PathBuf, Vec<i64>)>,
@@ -1300,11 +1302,11 @@ fn load_source(app: &AppWindow) {
         }
         let mut shots = vec![];
         let mut first: Option<Timeline> = None;
-        // only the film between start and end (titles stay out), for cut lists and detected cuts alike; changing
-        // them needs no new analysis
-        let (from, to) = (app.get_detect_from(), app.get_detect_to());
+        // only the film between start and end of each master (titles stay out), for cut lists and detected cuts
+        // alike; changing them needs no new analysis
         for (i, source) in &pairs {
             let info = &st.masters[*i].1;
+            let (from, to) = st.films.get(&st.masters[*i].0).cloned().unwrap_or_default();
             let read = match source {
                 CutSource::List(list) => read_cut_list(list, info.rate).map_err(|e| format!("{}: {e}", file_name(list))),
                 CutSource::Detected(cuts) => Ok(detected_timeline(&st.masters[*i].0, cuts, info)),
@@ -1347,19 +1349,23 @@ fn load_source(app: &AppWindow) {
 
 /// The master and cut-list lists of the Source tab.
 fn show_files(app: &AppWindow) {
-    let (m, l): (Vec<SharedString>, Vec<SharedString>) = with_state(app, |st| {
+    let (m, l): (Vec<MasterRow>, Vec<SharedString>) = with_state(app, |st| {
         let st = st.borrow();
         let detected = st.detected.iter().map(|d| {
             tr(["{} – {n} shots detected", "{} – {n} Shots erkannt", "{} – {n} plans détectés", "{} – {n} planos detectados"]).replace("{}", &file_name(&d.0)).replace("{n}", &(d.1.len() - 1).to_string()).into()
         });
-        (st.masters.iter().map(|m| file_name(&m.0).into()).collect(), st.lists.iter().map(|l| file_name(l).into()).chain(detected).collect())
+        let masters = st.masters.iter().map(|m| {
+            let (from, to) = st.films.get(&m.0).cloned().unwrap_or_default();
+            MasterRow { name: file_name(&m.0).into(), from: from.into(), to: to.into() }
+        });
+        (masters.collect(), st.lists.iter().map(|l| file_name(l).into()).chain(detected).collect())
     });
     // a master with neither a cut list nor detected cuts
     app.set_can_detect(with_state(app, |st| {
         let st = st.borrow();
         st.masters.iter().any(|(m, _)| !st.lists.iter().any(|l| stem(l) == stem(m)) && !st.detected.iter().any(|d| &d.0 == m))
     }));
-    app.set_master_names(ModelRc::new(VecModel::from(m)));
+    app.set_masters_shown(ModelRc::new(VecModel::from(m)));
     app.set_list_names(ModelRc::new(VecModel::from(l)));
 }
 
@@ -1800,7 +1806,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
         "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
-        "film": [app.get_detect_from().as_str(), app.get_detect_to().as_str()],
+        "films": st.masters.iter().map(|m| st.films.get(&m.0).cloned().unwrap_or_default()).collect::<Vec<_>>(),
         "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "detected": st.detected, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
     })
@@ -1891,7 +1897,7 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             volumes_off: st.volumes.iter().filter(|v| !v.1).map(|v| v.0.clone()).collect(),
             look: preset_json(app),
             headline: app.get_headline().to_string(),
-            film: (app.get_detect_from().to_string(), app.get_detect_to().to_string()),
+            films: st.masters.iter().filter_map(|m| Some((m.0.clone(), st.films.get(&m.0)?.clone()))).collect(),
             name: t.name,
             rate: t.rate,
             sequences: st.sequences,
@@ -1959,8 +1965,7 @@ fn open_project(app: &AppWindow, path: PathBuf) {
         st.masters.clear();
         st.lists = p.lists.clone();
         st.detected = p.detected.clone();
-        app.set_detect_from(p.film.0.clone().into());
-        app.set_detect_to(p.film.1.clone().into());
+        st.films = p.films.iter().cloned().collect();
         st.bin = p.bin.clone();
         st.volumes = p.volumes_off.iter().map(|v| (v.clone(), false)).collect();
         st.done = p.stills.iter().filter_map(|s| Some((s.job.clone()?, s.file.clone().ok()?))).collect();
@@ -2495,11 +2500,19 @@ fn wire_source(app: &AppWindow) {
         ModelRc::new(VecModel::from(v))
     });
     // start or end of the film changed: the detected shots follow at once
+    // a master's start or end left: read again when it changed
     app.on_film_changed({
         let weak = app.as_weak();
-        move || {
+        move |i, from, to| {
             let Some(app) = weak.upgrade() else { return };
-            if app.get_mode() == 0 && with_state(&app, |st| !st.borrow().masters.is_empty()) {
+            let changed = with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                let Some(m) = st.masters.get(i as usize).map(|m| m.0.clone()) else { return false };
+                let new = (from.to_string(), to.to_string());
+                st.films.insert(m, new.clone()) != Some(new)
+            });
+            if changed && app.get_mode() == 0 {
+                show_files(&app);
                 load_source(&app);
             }
         }
