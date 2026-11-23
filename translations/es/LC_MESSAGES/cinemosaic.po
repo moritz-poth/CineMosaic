@@ -554,6 +554,42 @@ msgstr "El texto elimina la sombra paralela"
 msgid "As in Photoshop’s layer style: the angle is where the light comes from, the shadow falls the other way. With Use global light every text that has it on shares one angle. Spread hardens the edge, Size softens it, the contour shapes how it fades, noise roughens it."
 msgstr "Como en el estilo de capa de Photoshop: el ángulo es la dirección de la que viene la luz, la sombra cae hacia el lado contrario. Con «Usar luz global», todos los textos que lo tienen activado comparten un ángulo. Extensión endurece el borde, Tamaño lo suaviza, el contorno da forma a cómo se desvanece, el ruido lo vuelve granulado."
 
+msgid "Layout"
+msgstr "Disposición"
+
+msgid "Shot after shot"
+msgstr "Plano tras plano"
+
+msgid "Photomosaic"
+msgstr "Fotomosaico"
+
+msgid "Main picture"
+msgstr "Imagen principal"
+
+msgid "None yet: choose a picture, drop one onto the window, or click a still in the preview."
+msgstr "Ninguna todavía: elige una imagen, suelta una en la ventana o haz clic en un fotograma de la vista previa."
+
+msgid "Tiles across"
+msgstr "Teselas a lo ancho"
+
+msgid "Stills per shot"
+msgstr "Fotogramas por plano"
+
+msgid "Repeat at the earliest after"
+msgstr "Repetir como pronto tras"
+
+msgid "tiles"
+msgstr "teselas"
+
+msgid "Colour match"
+msgstr "Ajuste de color"
+
+msgid "Blend in main picture"
+msgstr "Fundir imagen principal"
+
+msgid "Every tile gets the still whose colours fit it best; a still comes back only that many tiles away. More stills per shot give more colours to choose from (Grab missing stills fetches them). Colour match tints each tile towards its place in the main picture, Blend in lays the main picture over everything – a little of both makes the picture clear."
+msgstr "Cada tesela recibe el fotograma cuyos colores encajan mejor; un fotograma solo vuelve a tantas teselas de distancia. Más fotogramas por plano dan más colores para elegir («Capturar fotogramas que faltan» los captura). El ajuste de color tiñe cada tesela hacia su sitio en la imagen principal, Fundir pone la imagen principal sobre todo: un poco de ambos hace la imagen clara."
+
 msgid "Background"
 msgstr "Fondo"
 

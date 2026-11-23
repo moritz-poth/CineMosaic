@@ -1963,6 +1963,16 @@ export component AppWindow inherits SheetWindow {
     in property <[Swatch]> head-palette;
     in-out property <int> line-slot;
     in-out property <int> head-slot;
+    // photomosaic (Sheet tab): the stills rebuild a main picture (a file, or a still clicked in the preview)
+    in-out property <bool> mosaic-on;
+    in-out property <string> mosaic-cols: "40";
+    in-out property <string> mosaic-frames: "1";
+    in-out property <string> mosaic-repeat: "3";
+    in-out property <string> mosaic-tint: "40";
+    in-out property <string> mosaic-overlay: "10";
+    in property <string> mosaic-name;
+    callback pick-mosaic-image();
+    callback page-clicked(float, float);
     // sheet background (2): the page behind the stills
     in-out property <string> bg-color: "#ffffff";
     in property <color> bg-swatch: white;
@@ -2315,6 +2325,45 @@ export component AppWindow inherits SheetWindow {
                                     }
                                 }
                                 if root.trim: Para { text: @tr("The sheet is laid out in an area of the picture format inside the paper, with crop marks at its corners to cut it out."); }
+                                Rectangle { height: 8px; }
+                                Row {
+                                    text: @tr("Layout");
+                                    Dropdown {
+                                        label: @tr("Layout");
+                                        items: [@tr("Shot after shot"), @tr("Photomosaic")];
+                                        current: root.mosaic-on ? 1 : 0;
+                                        selected(i) => { root.mosaic-on = i == 1; root.sheet-changed(); }
+                                    }
+                                }
+                                if root.mosaic-on: VerticalLayout {
+                                    spacing: 6px;
+                                    Row {
+                                        text: @tr("Main picture");
+                                        CheckButton { text: @tr("Choose…"); small: true; clicked => { root.pick-mosaic-image(); } }
+                                    }
+                                    Para { text: root.mosaic-name != "" ? root.mosaic-name : @tr("None yet: choose a picture, drop one onto the window, or click a still in the preview."); color: root.mosaic-name != "" ? Theme.text : Theme.muted; }
+                                    Row {
+                                        text: @tr("Tiles across");
+                                        NumberField { text <=> root.mosaic-cols; scrub: 0.2; step: 1; minimum: 4; maximum: 200; unit: ""; label: @tr("Tiles across"); invalid: root.invalid == "mosaic-cols"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Stills per shot");
+                                        NumberField { text <=> root.mosaic-frames; scrub: 0.05; step: 1; minimum: 1; maximum: 5; unit: ""; label: @tr("Stills per shot"); invalid: root.invalid == "mosaic-frames"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Repeat at the earliest after");
+                                        NumberField { text <=> root.mosaic-repeat; scrub: 0.05; step: 1; minimum: 0; maximum: 20; unit: @tr("tiles"); label: @tr("Repeat at the earliest after"); invalid: root.invalid == "mosaic-repeat"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Colour match");
+                                        NumberField { text <=> root.mosaic-tint; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Colour match"); invalid: root.invalid == "mosaic-tint"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Row {
+                                        text: @tr("Blend in main picture");
+                                        NumberField { text <=> root.mosaic-overlay; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Blend in main picture"); invalid: root.invalid == "mosaic-overlay"; edited => { root.sheet-changed(); } }
+                                    }
+                                    Para { text: @tr("Every tile gets the still whose colours fit it best; a still comes back only that many tiles away. More stills per shot give more colours to choose from (Grab missing stills fetches them). Colour match tints each tile towards its place in the main picture, Blend in lays the main picture over everything – a little of both makes the picture clear."); }
+                                }
                                 Para { text: root.sheet-info; }
                             }
                             // alignment start: free space goes below, never between the rows
@@ -2764,6 +2813,12 @@ export component AppWindow inherits SheetWindow {
                     }
                     double-clicked => {
                         if Math.abs(root.zoom - 1) > 0.01 { desk.zoom-to(1, self.mouse-x, self.mouse-y); } else { desk.zoom-to(2, self.mouse-x, self.mouse-y); }
+                    }
+                    // Sheet tab, photomosaic: a click (not a drag) on a still makes it the main picture
+                    clicked => {
+                        if root.side-tab == 1 && root.mosaic-on && Math.abs(self.mouse-x - self.pressed-x) < 3px && Math.abs(self.mouse-y - self.pressed-y) < 3px {
+                            root.page-clicked((self.mouse-x - page.x) / page.width, (self.mouse-y - page.y) / page.height);
+                        }
                     }
                     scroll-event(e) => {
                         if e.modifiers.control {

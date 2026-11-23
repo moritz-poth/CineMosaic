@@ -12,6 +12,7 @@ pub mod frames;
 pub mod layout;
 pub mod log;
 pub mod media;
+pub mod mosaic;
 pub mod project;
 pub mod report;
 pub mod selftest;
@@ -59,6 +60,9 @@ pub fn read_cut_list(path: &Path, rate: Rate) -> Result<Timeline, String> {
 
 /// The stills that fill `sheet`'s grid for stills of width/height `aspect` (see `timeline::fill`).
 pub fn picks(shots: &[Shot], sheet: &layout::Sheet, aspect: f64) -> Vec<Pick> {
+    if sheet.spread > 0 {
+        return timeline::spread(shots, sheet.spread);
+    }
     let g = sheet.grid(shots.len(), aspect);
     timeline::fill(shots, g.slots())
 }

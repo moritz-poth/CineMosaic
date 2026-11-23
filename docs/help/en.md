@@ -54,6 +54,10 @@ Colour, for the frame line, the headline and the background of the sheet (Sheet 
 
 Sheet › Crop marks lays the sheet out in an area of the picture format inside the paper – for stills in 2:1 an area of 2:1 – and puts crop marks at its corners, so you can cut it out. The background colour then fills this area plus 3 mm bleed; the paper beside the crop marks stays white.
 
+## Photomosaic
+
+Under Sheet › Layout, Photomosaic lets the stills rebuild a main picture: choose a picture (Choose…, or drop a JPEG, PNG or TIFF onto the window), or click a still in the preview. The main picture is cut into tiles – Tiles across sets how many; every tile gets the still whose colours fit it best, compared as a 3 × 3 pattern, so edges and gradients match too. A still comes back only after Repeat at the earliest after tiles. Stills per shot (1–5) takes more frames from every shot, spread over it, for more colours to choose from; Grab stills fetches them. Colour match tints every tile towards its place in the main picture, Blend in main picture lays the picture over everything – a little of both makes it clear. The tiles touch (the gap is not used), texts and frame line lie on top. Projects keep the main picture.
+
 ## Projects
 
 File › Save Project (⌘S) keeps everything as one project file: source, sheet, headline and the grabbed stills. File › Open Project… (⌘O), Open Recent or a double-click in the Finder brings it back – at once, with its stills, even when the master, the bin or the volumes are not connected. CineMosaic then reads the source again: if the cut has changed, unchanged shots keep their stills, new or changed ones show grey and "Grab N missing stills" grabs only those (frames grabbed before are reused). Every project has its own window: New Project (⌘N) opens a new, empty window, and an opened project gets its own window too (an empty window takes it; a project that is already open comes to the front). Save Project As… (⇧⌘S) makes a copy, Close Window (⌘W) closes one. Before unsaved changes would be lost – closing a window or Quit – CineMosaic asks whether to save them.

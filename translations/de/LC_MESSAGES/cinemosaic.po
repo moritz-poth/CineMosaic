@@ -554,6 +554,42 @@ msgstr "Text spart Schlagschatten aus"
 msgid "As in Photoshop’s layer style: the angle is where the light comes from, the shadow falls the other way. With Use global light every text that has it on shares one angle. Spread hardens the edge, Size softens it, the contour shapes how it fades, noise roughens it."
 msgstr "Wie im Ebenenstil von Photoshop: Der Winkel ist die Richtung, aus der das Licht kommt, der Schatten fällt zur Gegenseite. Mit „Globalen Lichteinfall verwenden“ teilen sich alle Texte, bei denen es an ist, einen Winkel. Überfüllen macht die Kante härter, Größe weicher, die Kontur formt, wie er ausläuft, Rauschen macht ihn körnig."
 
+msgid "Layout"
+msgstr "Anordnung"
+
+msgid "Shot after shot"
+msgstr "Shot für Shot"
+
+msgid "Photomosaic"
+msgstr "Fotomosaik"
+
+msgid "Main picture"
+msgstr "Hauptbild"
+
+msgid "None yet: choose a picture, drop one onto the window, or click a still in the preview."
+msgstr "Noch keins: wähle ein Bild, zieh eins aufs Fenster oder klicke ein Still in der Vorschau an."
+
+msgid "Tiles across"
+msgstr "Kacheln quer"
+
+msgid "Stills per shot"
+msgstr "Stills pro Shot"
+
+msgid "Repeat at the earliest after"
+msgstr "Wiederholung frühestens nach"
+
+msgid "tiles"
+msgstr "Kacheln"
+
+msgid "Colour match"
+msgstr "Farbangleichung"
+
+msgid "Blend in main picture"
+msgstr "Hauptbild einblenden"
+
+msgid "Every tile gets the still whose colours fit it best; a still comes back only that many tiles away. More stills per shot give more colours to choose from (Grab missing stills fetches them). Colour match tints each tile towards its place in the main picture, Blend in lays the main picture over everything – a little of both makes the picture clear."
+msgstr "Jede Kachel bekommt das Still, dessen Farben am besten passen; ein Still kommt erst so viele Kacheln weiter wieder. Mehr Stills pro Shot geben mehr Farben zur Auswahl („Fehlende Stills holen“ holt sie). Farbangleichung tönt jede Kachel zu ihrer Stelle im Hauptbild hin, Einblenden legt das Hauptbild über alles – ein wenig von beidem macht das Bild deutlich."
+
 msgid "Background"
 msgstr "Hintergrund"
 

@@ -45,6 +45,8 @@ pub struct Project {
     pub source_info: String,
     pub shots: Vec<Shot>,
     pub still_aspect: Option<f64>,
+    /// the main picture of a photomosaic (kept as mosaic.png in the package)
+    pub mosaic: Option<image::RgbImage>,
     pub stills: Vec<Still>,
 }
 
@@ -105,14 +107,33 @@ struct FileProject {
     shots: Vec<FileShot>,
     still_aspect: Option<f64>,
     stills: Vec<FileStill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mosaic: Option<String>,
 }
 
-fn part_name(p: Part) -> &'static str {
+fn part_name(p: Part) -> String {
     match p {
-        Part::Middle => "middle",
-        Part::FirstThird => "first-third",
-        Part::SecondThird => "second-third",
+        Part::Middle => "middle".into(),
+        Part::FirstThird => "first-third".into(),
+        Part::SecondThird => "second-third".into(),
+        Part::Of(k, n) => format!("{k}-of-{n}"),
     }
+}
+
+fn part_from(s: &str) -> Option<Part> {
+    Some(match s {
+        "middle" => Part::Middle,
+        "first-third" => Part::FirstThird,
+        "second-third" => Part::SecondThird,
+        _ => {
+            let (k, n) = s.split_once("-of-")?;
+            let (k, n): (u8, u8) = (k.parse().ok()?, n.parse().ok()?);
+            if k == 0 || k > n || n > 5 {
+                return None;
+            }
+            Part::Of(k, n)
+        }
+    })
 }
 
 /// Writes the project to `path` (a folder ending in .cinemosaic): first next to it as "….part", then swapped in, so
@@ -137,7 +158,7 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         stills.push(Still { file: file.as_ref().map(|r| path.join(r)).ok_or_else(|| error.clone().unwrap_or_default()), ..s.clone() });
         file_stills.push(FileStill {
             shot: s.shot,
-            part: part_name(s.part).into(),
+            part: part_name(s.part),
             file,
             error,
             media: s.job.as_ref().map(|j| j.0.clone()),
@@ -166,7 +187,11 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         shots: p.shots.iter().map(|s| FileShot { name: s.name.clone(), start: s.start, end: s.end, track: s.track, key: s.key, item_start: s.item_start }).collect(),
         still_aspect: p.still_aspect,
         stills: file_stills,
+        mosaic: p.mosaic.is_some().then(|| "mosaic.png".to_string()),
     };
+    if let Some(img) = &p.mosaic {
+        img.save(part.join("mosaic.png")).map_err(|e| e.to_string())?;
+    }
     let json = serde_json::to_vec_pretty(&fp).map_err(|e| e.to_string())?;
     std::fs::write(part.join("project.json"), json).map_err(io)?;
     // swap: the old package goes aside first and is removed only when the new one is in place
@@ -215,12 +240,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
         .into_iter()
         .filter(|s| s.shot < shots.len())
         .filter_map(|s| {
-            let part = match s.part.as_str() {
-                "middle" => Part::Middle,
-                "first-third" => Part::FirstThird,
-                "second-third" => Part::SecondThird,
-                _ => return None,
-            };
+            let part = part_from(&s.part)?;
             // only files inside the package
             let file = match s.file.filter(|r| r.starts_with("stills/") && !r.contains("..")) {
                 Some(r) => inside(&r).ok_or_else(|| "still missing in the project".to_string()),
@@ -249,6 +269,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
         shots,
         still_aspect: fp.still_aspect,
         stills,
+        mosaic: fp.mosaic.filter(|r| r == "mosaic.png").and_then(|r| inside(&r)).and_then(|f| image::open(f).ok()).map(|i| i.to_rgb8()),
     })
 }
 
@@ -281,6 +302,7 @@ mod tests {
             source_info: "1 shot".into(),
             shots: vec![shot],
             still_aspect: Some(1.78),
+            mosaic: Some(image::RgbImage::from_pixel(4, 3, image::Rgb([10, 200, 30]))),
             stills: vec![
                 Still { shot: 0, part: Part::FirstThird, file: Ok(still.clone()), job: Some(("/m.mov".into(), 30)) },
                 Still { shot: 0, part: Part::SecondThird, file: Err("no picture".into()), job: None },

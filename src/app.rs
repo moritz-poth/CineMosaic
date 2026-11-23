@@ -64,6 +64,12 @@ struct State {
     text_open: usize,
     /// for each text the sheet draws (`Sheet::texts`), its place in `texts`
     text_index: Vec<usize>,
+    /// photomosaic: the main picture; the colour patterns of the stills (from the preview copies, in the picture
+    /// format, made once per set of copies) and the last tile plan with what it was made from
+    mosaic_target: Option<Arc<RgbImage>>,
+    feats: HashMap<Pick, cinemosaic::mosaic::Feat>,
+    feats_from: Option<(Arc<HashMap<Pick, RgbImage>>, u64)>,
+    mosaic_plan: Option<(Vec<u64>, Arc<Vec<usize>>)>,
     /// this window's preview renderer and the generation of its newest job
     renderer: std::cell::OnceCell<(std::sync::mpsc::Sender<RenderJob>, Arc<AtomicUsize>)>,
     gate: Arc<Gate>,
@@ -1004,7 +1010,96 @@ fn read_all(app: &AppWindow) -> Result<(layout::Sheet, Option<f64>), &'static st
     let picture = read_picture(app)?;
     let aspect = picture.unwrap_or_else(|| with_state(app, |st| st.borrow().frame_aspect()));
     read_decor(app, &mut sheet, aspect)?;
+    read_mosaic(app, &mut sheet, aspect)?;
     Ok((sheet, picture))
+}
+
+/// The main picture of a photomosaic, at most 3000 px on its long side (more never shows in a tile or a light blend).
+fn set_mosaic_target(app: &AppWindow, img: RgbImage, name: String) {
+    let (w, h) = img.dimensions();
+    let s = (3000.0 / w.max(h) as f64).min(1.0);
+    let img = if s < 1.0 { image::imageops::resize(&img, (w as f64 * s) as u32, (h as f64 * s) as u32, image::imageops::FilterType::Triangle) } else { img };
+    with_state(app, |st| st.borrow_mut().mosaic_target = Some(Arc::new(img)));
+    app.set_mosaic_name(name.into());
+    app.set_mosaic_on(true);
+    refresh(app);
+}
+
+/// Photomosaic fields → `sheet.mosaic` with its tile plan (made again only when something it depends on changed).
+/// Off, or no main picture yet: the sheet stays shot after shot.
+fn read_mosaic(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result<(), &'static str> {
+    if !app.get_mosaic_on() {
+        return Ok(());
+    }
+    let int = |v: SharedString, k: &'static str, lo: f64, hi: f64| whole(&v, k).and_then(|x| if (lo..=hi).contains(&x) { Ok(x) } else { Err(k) });
+    let cols = int(app.get_mosaic_cols(), "mosaic-cols", 4.0, 200.0)? as u32;
+    let frames = int(app.get_mosaic_frames(), "mosaic-frames", 1.0, 5.0)? as u32;
+    let repeat = int(app.get_mosaic_repeat(), "mosaic-repeat", 0.0, 20.0)? as u32;
+    let tint = int(app.get_mosaic_tint(), "mosaic-tint", 0.0, 100.0)? / 100.0;
+    let overlay = int(app.get_mosaic_overlay(), "mosaic-overlay", 0.0, 100.0)? / 100.0;
+    sheet.spread = frames;
+    let Some(target) = with_state(app, |st| st.borrow().mosaic_target.clone()) else { return Ok(()) };
+    let mut m = layout::Mosaic { target, cols, tiles: Arc::default(), tint, overlay };
+    let rows = m.rows(aspect);
+    m.tiles = with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        let picks = cinemosaic::timeline::spread(&st.shots, frames);
+        // the stills' colour patterns, in the format they are drawn in
+        let fresh = !st.feats_from.as_ref().is_some_and(|(t, a)| Arc::ptr_eq(t, &st.thumbs) && *a == aspect.to_bits());
+        if fresh {
+            st.feats.clear();
+            st.feats_from = Some((st.thumbs.clone(), aspect.to_bits()));
+        }
+        let todo: Vec<(Pick, RgbImage)> = picks.iter().filter(|p| !st.feats.contains_key(p)).filter_map(|p| Some((*p, st.thumbs.get(p)?.clone()))).collect();
+        for (p, t) in todo {
+            st.feats.insert(p, cinemosaic::mosaic::features(&layout::crop(&t, aspect)));
+        }
+        let have: Vec<Option<cinemosaic::mosaic::Feat>> = picks.iter().map(|p| st.feats.get(p).copied()).collect();
+        // what the plan depends on
+        let key = vec![Arc::as_ptr(&m.target) as u64, cols as u64, rows as u64, repeat as u64, aspect.to_bits(), picks.len() as u64, have.iter().filter(|f| f.is_some()).count() as u64, Arc::as_ptr(&st.thumbs) as u64];
+        if let Some((k, plan)) = &st.mosaic_plan
+            && *k == key
+        {
+            return plan.clone();
+        }
+        let tiles = cinemosaic::mosaic::target_features(&m.target, cols, rows);
+        let plan = Arc::new(cinemosaic::mosaic::assign(&tiles, cols, &have, repeat).unwrap_or_default());
+        st.mosaic_plan = Some((key, plan.clone()));
+        plan
+    });
+    sheet.mosaic = Some(m);
+    Ok(())
+}
+
+/// A click on the preview (fractions of the page) on the Sheet tab in mosaic mode: the still there becomes the
+/// main picture.
+fn page_clicked(app: &AppWindow, fx: f32, fy: f32) {
+    let Ok((sheet, picture)) = read_all(app) else { return };
+    let found = with_state(app, |st| {
+        let st = st.borrow();
+        let picks = st.picks(&sheet, picture);
+        let grid = sheet.grid(picks.len(), picture.unwrap_or(st.frame_aspect()));
+        let (w, h) = sheet.size_px();
+        let (x, y) = (fx as f64 * w as f64, fy as f64 * h as f64);
+        let cells = match &sheet.mosaic {
+            Some(_) => (grid.cols * grid.rows) as usize,
+            None => picks.len(),
+        };
+        let c = (0..cells).find(|&c| {
+            let (cx, cy, cw, ch) = grid.cell(c);
+            x >= cx as f64 && y >= cy as f64 && x < (cx + cw as i64) as f64 && y < (cy + ch as i64) as f64
+        })?;
+        let i = match &sheet.mosaic {
+            Some(m) => *m.tiles.get(c)?,
+            None => c,
+        };
+        let pick = *picks.get(i)?;
+        let img = st.stills.get(&pick).and_then(|r| r.as_ref().ok()).and_then(|p| image::open(p).ok()).map(|i| i.to_rgb8()).or_else(|| st.thumbs.get(&pick).cloned())?;
+        Some((cropped(img, picture), format!("{} {}", tr(["Still of shot", "Still aus Shot", "Image du plan", "Fotograma del plano"]), pick.0 + 1)))
+    });
+    if let Some((img, name)) = found {
+        set_mosaic_target(app, img, name);
+    }
 }
 
 /// Loads the installed font families in a thread (that takes a moment) and fills the Font menu; Helvetica Neue first
@@ -1904,13 +1999,11 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
         let mut thumbs = HashMap::new();
         for (j, shot) in st.shots.iter().enumerate() {
             let Some(i) = c.shots.iter().position(|o| o == shot) else { continue };
-            for part in [Part::Middle, Part::FirstThird, Part::SecondThird] {
-                if let Some(r) = c.stills.get(&(i, part)) {
-                    stills.insert((j, part), r.clone());
-                }
-                if let Some(t) = c.thumbs.get(&(i, part)) {
-                    thumbs.insert((j, part), t.clone());
-                }
+            for (&(_, part), r) in c.stills.iter().filter(|((s, _), _)| *s == i) {
+                stills.insert((j, part), r.clone());
+            }
+            for (&(_, part), t) in c.thumbs.iter().filter(|((s, _), _)| *s == i) {
+                thumbs.insert((j, part), t.clone());
             }
         }
         st.stills = stills;
@@ -1927,7 +2020,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 /// What a project would save, without file places: compared to tell whether there are unsaved changes.
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
-        "look": preset_json(app), "texts": text_words(app), "mode": app.get_mode(),
+        "look": preset_json(app), "texts": text_words(app), "mode": app.get_mode(), "mosaic": st.mosaic_target.as_ref().map(|t| Arc::as_ptr(t) as usize),
         "films": st.masters.iter().map(|m| st.films.get(&m.0).cloned().unwrap_or_default()).collect::<Vec<_>>(),
         "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "detected": st.detected, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
@@ -1975,6 +2068,7 @@ fn part_order(p: Part) -> u8 {
         Part::Middle => 0,
         Part::FirstThird => 1,
         Part::SecondThird => 2,
+        Part::Of(k, n) => 10 * n + k,
     }
 }
 
@@ -2026,6 +2120,7 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             source_info: app.get_source_info().to_string(),
             shots: st.shots.clone(),
             still_aspect: st.still_aspect,
+            mosaic: st.mosaic_target.as_deref().cloned(),
             stills,
         }
     });
@@ -2086,8 +2181,10 @@ fn open_project(app: &AppWindow, path: PathBuf) {
             t.0 = words.clone();
         }
         st.text_open = 0;
+        st.mosaic_target = p.mosaic.clone().map(Arc::new);
     });
     load_open(app);
+    app.set_mosaic_name(if p.mosaic.is_some() { tr(["Kept in the project", "Im Projekt gesichert", "Gardée dans le projet", "Guardada en el proyecto"]) } else { String::new() }.into());
     app.set_mode(p.mode.clamp(0, 1));
     let name = |o: &Option<PathBuf>| o.as_deref().map(file_name).unwrap_or_default();
 
@@ -2519,6 +2616,19 @@ fn wire_shared(app: &AppWindow, ctx: &Rc<Ctx>) {
 
 /// File endings of cut lists; any other dropped file is tried as a master file.
 const LIST_EXT: [&str; 4] = ["edl", "xml", "fcpxml", "aaf"];
+/// Pictures that can be a photomosaic's main picture (dropped or chosen).
+const IMAGE_EXT: [&str; 7] = ["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp"];
+
+/// A picture file as the main picture of the photomosaic; unreadable: said under the source.
+fn load_mosaic_image(app: &AppWindow, path: &Path) {
+    match image::open(path) {
+        Ok(img) => {
+            app.set_side_tab(1);
+            set_mosaic_target(app, img.to_rgb8(), file_name(path));
+        }
+        Err(e) => error_dialog(&format!("{}: {e}", file_name(path))),
+    }
+}
 
 /// Adds master files (read with ffprobe; unreadable ones are named in the error line) and cut lists, then reads the
 /// source again. Files already there are skipped.
@@ -2554,8 +2664,13 @@ fn take_dropped(app: &AppWindow, files: Vec<PathBuf>) {
     if app.get_state() == 1 {
         return;
     }
-    let is_list = |p: &PathBuf| p.extension().is_some_and(|x| LIST_EXT.iter().any(|l| x.eq_ignore_ascii_case(l)));
-    let (lists, masters): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().filter(|p| p.is_file()).partition(is_list);
+    let has = |p: &PathBuf, ext: &[&str]| p.extension().is_some_and(|x| ext.iter().any(|l| x.eq_ignore_ascii_case(l)));
+    // a picture: the main picture of a photomosaic
+    let (pictures, files): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().filter(|p| p.is_file()).partition(|p| has(p, &IMAGE_EXT));
+    if let Some(p) = pictures.last() {
+        load_mosaic_image(app, p);
+    }
+    let (lists, masters): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| has(p, &LIST_EXT));
     if masters.is_empty() && lists.is_empty() {
         return;
     }
@@ -2792,6 +2907,23 @@ fn wire_source(app: &AppWindow) {
 
 /// Sheet tab and preview: picture format, paper, unit, size, zoom, redraw; export and Show in Finder.
 fn wire_sheet(app: &AppWindow) {
+    // photomosaic: a picture file as the main picture, or a click on a still in the preview
+    app.on_pick_mosaic_image({
+        let weak = app.as_weak();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let Some(path) = rfd::FileDialog::new().set_title(tr(["Main picture", "Hauptbild", "Image principale", "Imagen principal"])).add_filter("Picture", &IMAGE_EXT).pick_file() else { return };
+            load_mosaic_image(&app, &path);
+        }
+    });
+    app.on_page_clicked({
+        let weak = app.as_weak();
+        move |fx, fy| {
+            if let Some(app) = weak.upgrade() {
+                page_clicked(&app, fx, fy);
+            }
+        }
+    });
     app.on_picture_chosen({
         let weak = app.as_weak();
         move |i| {

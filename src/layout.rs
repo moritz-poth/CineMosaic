@@ -239,6 +239,26 @@ impl Shadow {
     }
 }
 
+/// Photomosaic (user 2026-11-23): the main picture cut into `cols` tiles across (rows follow from its format and
+/// the stills'), every tile a still (`tiles`, row by row, index into the sheet's stills; see `mosaic::assign`),
+/// tinted towards the tile's colour by `tint` and with the main picture blended over by `overlay` (both 0–1).
+#[derive(Clone, Debug)]
+pub struct Mosaic {
+    pub target: std::sync::Arc<RgbImage>,
+    pub cols: u32,
+    pub tiles: std::sync::Arc<Vec<usize>>,
+    pub tint: f64,
+    pub overlay: f64,
+}
+
+impl Mosaic {
+    /// Rows of tiles for stills of width/height `aspect`, so the tiles together have the main picture's format.
+    pub fn rows(&self, aspect: f64) -> u32 {
+        let t = self.target.width() as f64 / self.target.height().max(1) as f64;
+        ((self.cols as f64 * aspect / t).round() as u32).max(1)
+    }
+}
+
 /// One text element of the sheet (the headline of earlier versions); several lines with \n.
 #[derive(Clone, Debug)]
 pub struct Headline {
@@ -274,13 +294,18 @@ pub struct Sheet {
     pub trim: Option<f64>,
     pub line: Option<Line>,
     pub texts: Vec<Headline>,
+    /// instead of shot after shot: the stills rebuild a main picture
+    pub mosaic: Option<Mosaic>,
+    /// stills per shot spread over it (photomosaic switched on, also while its main picture is still to come);
+    /// 0 = the usual middle (and the longest shots twice to fill the grid)
+    pub spread: u32,
     /// colour of the page behind the stills; with crop marks it fills the trim area plus 3 mm bleed
     pub background: [u8; 3],
 }
 
 impl Default for Sheet {
     fn default() -> Self {
-        Sheet { width_mm: 297.0, height_mm: 210.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, trim: None, line: None, texts: vec![], background: [255, 255, 255] }
+        Sheet { width_mm: 297.0, height_mm: 210.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, trim: None, line: None, texts: vec![], mosaic: None, spread: 0, background: [255, 255, 255] }
     }
 }
 
@@ -448,6 +473,7 @@ impl Sheet {
                 Rect { x: r.x - l, y: r.y - top, w: r.w + l + rt, h: r.h + top + b }
             })
             .collect();
+        let keep_out = if self.mosaic.is_some() { vec![] } else { keep_out }; // texts lie over a mosaic
         let place = |cols: u32, rows: u32| {
             let cw = ((area.w - (cols - 1) as f64 * g) / cols as f64).min((area.h - (rows - 1) as f64 * g) / rows as f64 * aspect).max(0.0);
             let ch = cw / aspect;
@@ -465,6 +491,15 @@ impl Sheet {
                 rows += 1;
             }
         };
+        if let Some(m) = &self.mosaic {
+            // tiles touch: a gap would break up the main picture
+            let g = 0.0;
+            let (cols, rows) = (m.cols.max(1), m.rows(aspect));
+            let cw = (area.w / cols as f64).min(area.h / rows as f64 * aspect).max(0.0);
+            let ch = cw / aspect;
+            let (bw, bh) = (cols as f64 * cw, rows as f64 * ch);
+            return Grid { cols, rows, cell_w: cw, cell_h: ch, x: area.x + (area.w - bw) / 2.0, y: area.y + (area.h - bh) / 2.0, gap: g, keep_out: vec![] };
+        }
         match self.columns {
             Some(c) => fit(c.clamp(1, n)),
             None => (1..=n).map(fit).fold(None::<Grid>, |best, c| match best {
@@ -811,6 +846,42 @@ fn draw_text(page: &mut RgbImage, sheet: &Sheet, hl: &Headline, t: &Placed) {
     }
 }
 
+/// The mosaic's tiles: each still is scaled once (cells differ by a pixel at most, so one size serves all), tinted
+/// towards its tile's colour, then the main picture is blended over the whole block.
+fn draw_mosaic(page: &mut RgbImage, m: &Mosaic, grid: &Grid, tile: &mut impl FnMut(usize, u32, u32) -> Option<RgbImage>) {
+    let cells = (grid.cols * grid.rows) as usize;
+    let (cw, ch) = (grid.cell_w.ceil().max(1.0) as u32, grid.cell_h.ceil().max(1.0) as u32);
+    // the main picture at the size of the block, for the tile colours and the blend
+    let (x0, y0) = (grid.x.round() as i64, grid.y.round() as i64);
+    let (bw, bh) = ((grid.cols as f64 * grid.cell_w + (grid.cols - 1) as f64 * grid.gap).round().max(1.0) as u32, (grid.rows as f64 * grid.cell_h + (grid.rows - 1) as f64 * grid.gap).round().max(1.0) as u32);
+    let target = imageops::resize(&*m.target, bw, bh, imageops::FilterType::Triangle);
+    let mut scaled: std::collections::HashMap<usize, Option<(RgbImage, [f32; 3])>> = std::collections::HashMap::new();
+    for c in 0..cells {
+        let (x, y, w, h) = grid.cell(c);
+        let Some(&i) = m.tiles.get(c) else { continue };
+        let Some((img, mean)) = scaled.entry(i).or_insert_with(|| tile(i, cw, ch).map(|t| { let mean = crate::mosaic::mean(&t); (t, mean) })).clone() else { continue };
+        let img = if img.dimensions() == (w, h) { img } else { imageops::resize(&img, w, h, imageops::FilterType::Triangle) };
+        // the tile's colour in the main picture
+        let (tx, ty) = ((x - x0).max(0) as u32, (y - y0).max(0) as u32);
+        let part = imageops::crop_imm(&target, tx.min(bw - 1), ty.min(bh - 1), w.min(bw - tx.min(bw - 1)), h.min(bh - ty.min(bh - 1))).to_image();
+        let want = crate::mosaic::mean(&part);
+        let shift: [f32; 3] = std::array::from_fn(|k| (want[k] - mean[k]) * m.tint as f32);
+        let (pw, ph) = page.dimensions();
+        for (px, py, p) in img.enumerate_pixels() {
+            let (gx, gy) = (x + px as i64, y + py as i64);
+            if gx < 0 || gy < 0 || gx >= pw as i64 || gy >= ph as i64 {
+                continue;
+            }
+            let t = part.get_pixel(px.min(part.width() - 1), py.min(part.height() - 1));
+            let out = page.get_pixel_mut(gx as u32, gy as u32);
+            for k in 0..3 {
+                let v = p[k] as f32 + shift[k];
+                out[k] = (v + (t[k] as f32 - v) * m.overlay as f32).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+}
+
 /// Draws the sheet. `still(i)` delivers still i (any size; it covers its cell). None leaves the cell grey.
 /// Stills are loaded one at a time, so a big sheet never holds all.
 pub fn render(sheet: &Sheet, n: usize, aspect: f64, mut still: impl FnMut(usize) -> Option<RgbImage>) -> RgbImage {
@@ -835,8 +906,8 @@ pub fn render_tiles(sheet: &Sheet, n: usize, aspect: f64, tile: impl Fn(usize, u
             });
         }
     });
-    let mut tiles = tiles.into_iter();
-    compose(sheet, n, &grid, |_, _, _| tiles.next().flatten())
+    // each still is asked for once (a mosaic asks in its own order)
+    compose(sheet, n, &grid, |i, _, _| tiles.get_mut(i).and_then(Option::take))
 }
 
 fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32, u32) -> Option<RgbImage>) -> RgbImage {
@@ -848,10 +919,15 @@ fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32
         let (r, b) = (plan.trim, sheet.px(MARK_OFFSET));
         fill(&mut page, r.x - b, r.y - b, r.x + r.w + b, r.y + r.h + b, sheet.background);
     }
-    for i in 0..n {
-        let (x, y, cw, ch) = grid.cell(i);
-        let tile = tile(i, cw, ch).unwrap_or_else(|| RgbImage::from_pixel(cw, ch, Rgb([200, 200, 200])));
-        imageops::overlay(&mut page, &tile, x, y);
+    match &sheet.mosaic {
+        Some(m) => draw_mosaic(&mut page, m, grid, &mut tile),
+        None => {
+            for i in 0..n {
+                let (x, y, cw, ch) = grid.cell(i);
+                let tile = tile(i, cw, ch).unwrap_or_else(|| RgbImage::from_pixel(cw, ch, Rgb([200, 200, 200])));
+                imageops::overlay(&mut page, &tile, x, y);
+            }
+        }
     }
     if let (Some((outer, t)), Some(l)) = (plan.line, &sheet.line) {
         // every text cuts a gap into every strand it covers

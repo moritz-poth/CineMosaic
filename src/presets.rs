@@ -65,6 +65,8 @@ pub fn preset_json(app: &AppWindow) -> serde_json::Value {
         "line-on": app.get_line_on(), "line-width": app.get_line_width().as_str(), "line-inset": app.get_line_inset().as_str(),
         "line-color": app.get_line_color().as_str(), "line-pattern": app.get_line_pattern(),
         "texts": text_styles(app), "global-angle": app.get_global_angle().as_str(),
+        "mosaic-on": app.get_mosaic_on(), "mosaic-cols": app.get_mosaic_cols().as_str(), "mosaic-frames": app.get_mosaic_frames().as_str(),
+        "mosaic-repeat": app.get_mosaic_repeat().as_str(), "mosaic-tint": app.get_mosaic_tint().as_str(), "mosaic-overlay": app.get_mosaic_overlay().as_str(),
         "export-format": app.get_export_format(),
     })
 }
@@ -208,6 +210,12 @@ pub fn apply_preset(app: &AppWindow, v: &serde_json::Value) {
     text("line-color", &|s| app.set_line_color(s));
     int("line-pattern", layout::Pattern::ALL.len() as i64 - 1, &|n| app.set_line_pattern(n));
     text("global-angle", &|s| app.set_global_angle(s));
+    boolean("mosaic-on", &|b| app.set_mosaic_on(b));
+    text("mosaic-cols", &|s| app.set_mosaic_cols(s));
+    text("mosaic-frames", &|s| app.set_mosaic_frames(s));
+    text("mosaic-repeat", &|s| app.set_mosaic_repeat(s));
+    text("mosaic-tint", &|s| app.set_mosaic_tint(s));
+    text("mosaic-overlay", &|s| app.set_mosaic_overlay(s));
     apply_text_styles(app, v);
     int("export-format", 3, &|n| app.set_export_format(n));
     match_slots(app);

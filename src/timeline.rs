@@ -101,6 +101,7 @@ impl Shot {
                 Part::Middle => d / 2,
                 Part::FirstThird => d / 3,
                 Part::SecondThird => d * 2 / 3,
+                Part::Of(k, n) => d * k as i64 / (n as i64 + 1),
             }
     }
 }
@@ -113,6 +114,14 @@ pub enum Part {
     FirstThird,
     /// after the second third
     SecondThird,
+    /// the k-th of n frames spread evenly over the shot (1 ≤ k ≤ n): more colours for a photomosaic
+    Of(u8, u8),
+}
+
+/// `frames` stills of every shot, spread evenly (1 = the middle), cut order kept: the stills of a photomosaic.
+pub fn spread(shots: &[Shot], frames: u32) -> Vec<Pick> {
+    let n = frames.clamp(1, 5) as u8;
+    (0..shots.len()).flat_map(|i| (1..=n).map(move |k| (i, if n == 1 { Part::Middle } else { Part::Of(k, n) }))).collect()
 }
 
 /// One still of the sheet: shot index and where in the shot.
