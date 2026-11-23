@@ -1776,6 +1776,8 @@ export component AppWindow inherits SheetWindow {
     // the open project's name ("" = none); every project window has its own id (Rust keeps its state under it)
     in property <string> project-name;
     in property <int> win-id;
+    // files from the Finder are being dragged over the window (Rust, winit events)
+    in property <bool> drop-hover;
     title: root.project-name == "" ? "CineMosaic" : root.project-name + " – CineMosaic";
     // resizable; never smaller than the side column needs (user 2026-11-20)
     min-width: root.smallest-width;
@@ -2673,11 +2675,60 @@ export component AppWindow inherits SheetWindow {
                 }
             }
             if root.state == 0 && root.source-info == "": Text {
-                text: root.mode == 0 ? @tr("Choose a master file and its cut list.") : @tr("Choose a bin with your sequence.");
+                text: root.mode == 0 ? @tr("Choose a master file and its cut list – or drag them here.") : @tr("Choose a bin with your sequence.");
                 font-size: 13px;
                 color: #60666c;
                 x: page.x + (page.width - self.width) / 2;
                 y: page.y + (page.height - self.height) / 2;
+            }
+        }
+    }
+    // files dragged over the window: one big landing area with a file icon in the middle, as in other Mac apps
+    if root.drop-hover: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: Theme.background.with-alpha(0.88);
+        Rectangle {
+            x: 14px;
+            y: 14px;
+            width: parent.width - 28px;
+            height: parent.height - 28px;
+            border-radius: 14px;
+            border-width: 2px;
+            border-color: root.state == 1 ? Theme.line : Theme.accent;
+            background: root.state == 1 ? transparent : Theme.accent.with-alpha(0.06);
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 14px;
+            HorizontalLayout {
+                alignment: center;
+                // a sheet of paper with a folded corner
+                Path {
+                    width: 56px;
+                    height: 70px;
+                    viewbox-width: 56;
+                    viewbox-height: 70;
+                    commands: "M 4 2 L 38 2 L 54 18 L 54 68 L 4 68 Z M 38 2 L 38 18 L 54 18";
+                    stroke: root.state == 1 ? Theme.disabled : Theme.accent;
+                    stroke-width: 2.5px;
+                    fill: Theme.background;
+                }
+            }
+            Text {
+                text: root.state == 1 ? @tr("Please wait until CineMosaic is done") : @tr("Drop master files and cut lists");
+                font-size: 17px;
+                font-weight: 600;
+                color: Theme.text;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: root.state == 1 ? "" : @tr("Videos become master files; EDL, XML, FCPXML and AAF become cut lists.");
+                font-size: 12px;
+                color: Theme.muted;
+                horizontal-alignment: center;
             }
         }
     }

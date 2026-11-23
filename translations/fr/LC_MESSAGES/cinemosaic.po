@@ -407,8 +407,20 @@ msgstr "Enregistrer…"
 msgid "Preview of the sheet"
 msgstr "Aperçu de la planche"
 
-msgid "Choose a master file and its cut list."
-msgstr "Choisissez un fichier master et sa liste de montage."
+msgid "Choose a master file and its cut list – or drag them here."
+msgstr "Choisissez un fichier master et sa liste de montage – ou glissez-les ici."
+
+msgid "Please wait until CineMosaic is done"
+msgstr "Veuillez patienter jusqu’à ce que CineMosaic ait terminé"
+
+msgid "Drop master files and cut lists"
+msgstr "Déposez les fichiers master et les listes de montage"
+
+msgid "Videos become master files; EDL, XML, FCPXML and AAF become cut lists."
+msgstr "Les vidéos deviennent des fichiers master ; EDL, XML, FCPXML et AAF des listes de montage."
+
+msgid "Background"
+msgstr "Fond"
 
 msgid "Choose a bin with your sequence."
 msgstr "Choisissez un chutier avec votre séquence."
@@ -559,6 +571,3 @@ msgstr "L’ancre est le point de la planche auquel le titre est accroché ; X e
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Faites glisser à gauche ou à droite dans un champ pour changer la valeur ; cliquez pour la saisir."
-
-msgid "Background"
-msgstr "Fond"

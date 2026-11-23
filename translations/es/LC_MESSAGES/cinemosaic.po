@@ -407,8 +407,20 @@ msgstr "Guardar…"
 msgid "Preview of the sheet"
 msgstr "Vista previa de la hoja"
 
-msgid "Choose a master file and its cut list."
-msgstr "Elige un máster y su lista de montaje."
+msgid "Choose a master file and its cut list – or drag them here."
+msgstr "Elige un máster y su lista de montaje – o arrástralos aquí."
+
+msgid "Please wait until CineMosaic is done"
+msgstr "Espera hasta que CineMosaic termine"
+
+msgid "Drop master files and cut lists"
+msgstr "Suelta archivos máster y listas de montaje"
+
+msgid "Videos become master files; EDL, XML, FCPXML and AAF become cut lists."
+msgstr "Los vídeos se convierten en archivos máster; EDL, XML, FCPXML y AAF en listas de montaje."
+
+msgid "Background"
+msgstr "Fondo"
 
 msgid "Choose a bin with your sequence."
 msgstr "Elige un bin con tu secuencia."
@@ -559,6 +571,3 @@ msgstr "El ancla es el punto de la hoja del que cuelga el título; X e Y lo muev
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Arrastra a la izquierda o a la derecha en un campo para cambiar el valor; haz clic para escribirlo."
-
-msgid "Background"
-msgstr "Fondo"

@@ -407,8 +407,20 @@ msgstr "Speichern…"
 msgid "Preview of the sheet"
 msgstr "Vorschau des Bogens"
 
-msgid "Choose a master file and its cut list."
-msgstr "Wähle ein Masterfile und seine Schnittliste."
+msgid "Choose a master file and its cut list – or drag them here."
+msgstr "Wähle ein Masterfile und seine Schnittliste – oder zieh sie hierher."
+
+msgid "Please wait until CineMosaic is done"
+msgstr "Bitte warte, bis CineMosaic fertig ist"
+
+msgid "Drop master files and cut lists"
+msgstr "Masterfiles und Schnittlisten ablegen"
+
+msgid "Videos become master files; EDL, XML, FCPXML and AAF become cut lists."
+msgstr "Videos werden Masterfiles, EDL, XML, FCPXML und AAF Schnittlisten."
+
+msgid "Background"
+msgstr "Hintergrund"
 
 msgid "Choose a bin with your sequence."
 msgstr "Wähle einen Bin mit deiner Sequenz."
@@ -559,6 +571,3 @@ msgstr "Der Anker ist der Punkt des Bogens, an dem die Headline hängt; X und Y 
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Im Feld nach links oder rechts ziehen ändert den Wert; Klicken zum Tippen."
-
-msgid "Background"
-msgstr "Hintergrund"

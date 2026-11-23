@@ -2377,6 +2377,84 @@ fn wire_shared(app: &AppWindow, ctx: &Rc<Ctx>) {
     });
 }
 
+/// File endings of cut lists; any other dropped file is tried as a master file.
+const LIST_EXT: [&str; 4] = ["edl", "xml", "fcpxml", "aaf"];
+
+/// Adds master files (read with ffprobe; unreadable ones are named in the error line) and cut lists, then reads the
+/// source again. Files already there are skipped.
+fn add_files(app: &AppWindow, masters: Vec<PathBuf>, lists: Vec<PathBuf>) {
+    let mut errors = vec![];
+    for p in masters {
+        if with_state(app, |st| st.borrow().masters.iter().any(|m| m.0 == p)) {
+            continue;
+        }
+        match frames::probe(&p) {
+            Ok(info) => with_state(app, |st| st.borrow_mut().masters.push((p, info))),
+            Err(e) => errors.push(format!("{}: {e}", file_name(&p))),
+        }
+    }
+    with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        for p in lists {
+            if !st.lists.contains(&p) {
+                st.lists.push(p);
+            }
+        }
+    });
+    show_files(app);
+    load_source(app);
+    if !errors.is_empty() {
+        let shown = app.get_source_error();
+        app.set_source_error(errors.into_iter().chain((!shown.is_empty()).then(|| shown.to_string())).collect::<Vec<_>>().join(" · ").into());
+    }
+}
+
+/// Dropped files: cut lists by their ending, every other file as a master file (folders are skipped).
+fn take_dropped(app: &AppWindow, files: Vec<PathBuf>) {
+    if app.get_state() == 1 {
+        return;
+    }
+    let is_list = |p: &PathBuf| p.extension().is_some_and(|x| LIST_EXT.iter().any(|l| x.eq_ignore_ascii_case(l)));
+    let (lists, masters): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().filter(|p| p.is_file()).partition(is_list);
+    if masters.is_empty() && lists.is_empty() {
+        return;
+    }
+    app.set_side_tab(0);
+    app.set_mode(0);
+    add_files(app, masters, lists);
+}
+
+/// Files dragged from the Finder onto the window: the landing overlay while they hover, on the drop cut lists by
+/// their ending, everything else as master files. A bin window switches to master file + cut list; while a run
+/// works nothing is taken (the overlay says so).
+fn wire_drop(app: &AppWindow) {
+    use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
+    let weak = app.as_weak();
+    let dropped: Rc<RefCell<Vec<PathBuf>>> = Rc::default();
+    app.window().on_winit_window_event(move |_, e| {
+        let Some(app) = weak.upgrade() else { return EventResult::Propagate };
+        match e {
+            WindowEvent::HoveredFile(_) => app.set_drop_hover(true),
+            WindowEvent::HoveredFileCancelled => app.set_drop_hover(false),
+            WindowEvent::DroppedFile(p) => {
+                app.set_drop_hover(false);
+                // winit sends one event per file: the first schedules taking them all at once (one source reload)
+                if dropped.borrow().is_empty() {
+                    let (weak, dropped) = (weak.clone(), dropped.clone());
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        if let Some(app) = weak.upgrade() {
+                            take_dropped(&app, dropped.take());
+                        }
+                    });
+                }
+                dropped.borrow_mut().push(p.clone());
+            }
+            _ => return EventResult::Propagate,
+        }
+        EventResult::PreventDefault
+    });
+}
+
 /// Source tab: master files, cut lists, cut detection and its film range, bin, sequences, volumes; grabbing.
 fn wire_source(app: &AppWindow) {
     // master files and cut lists are added (several at a time); the × removes one
@@ -2385,41 +2463,17 @@ fn wire_source(app: &AppWindow) {
         move || {
             let Some(app) = weak.upgrade() else { return };
             let Some(files) = rfd::FileDialog::new().set_title(tr(["Master files", "Masterfiles", "Fichiers master", "Archivos máster"])).pick_files() else { return };
-            let mut errors = vec![];
-            for p in files {
-                if with_state(&app, |st| st.borrow().masters.iter().any(|m| m.0 == p)) {
-                    continue;
-                }
-                match frames::probe(&p) {
-                    Ok(info) => with_state(&app, |st| st.borrow_mut().masters.push((p, info))),
-                    Err(e) => errors.push(format!("{}: {e}", file_name(&p))),
-                }
-            }
-            show_files(&app);
-            load_source(&app);
-            if !errors.is_empty() {
-                let shown = app.get_source_error();
-                app.set_source_error(errors.into_iter().chain((!shown.is_empty()).then(|| shown.to_string())).collect::<Vec<_>>().join(" · ").into());
-            }
+            add_files(&app, files, vec![]);
         }
     });
     app.on_pick_list({
         let weak = app.as_weak();
         move || {
             let Some(app) = weak.upgrade() else { return };
-            let Some(files) = rfd::FileDialog::new().set_title(tr(["Cut lists", "Schnittlisten", "Listes de montage", "Listas de montaje"])).add_filter("EDL, XML, FCPXML, AAF", &["edl", "xml", "fcpxml", "aaf"]).pick_files() else {
+            let Some(files) = rfd::FileDialog::new().set_title(tr(["Cut lists", "Schnittlisten", "Listes de montage", "Listas de montaje"])).add_filter("EDL, XML, FCPXML, AAF", &LIST_EXT).pick_files() else {
                 return;
             };
-            with_state(&app, |st| {
-                let mut st = st.borrow_mut();
-                for p in files {
-                    if !st.lists.contains(&p) {
-                        st.lists.push(p);
-                    }
-                }
-            });
-            show_files(&app);
-            load_source(&app);
+            add_files(&app, vec![], files);
         }
     });
     app.on_tc_edit({
@@ -2826,6 +2880,7 @@ fn wire_presets(app: &AppWindow) {
 /// One project window: its tabs, presets and the File menu.
 fn wire_window(app: &AppWindow, ctx: &Rc<Ctx>) {
     wire_source(app);
+    wire_drop(app);
     wire_sheet(app);
     wire_design(app, ctx);
     wire_presets(app);
