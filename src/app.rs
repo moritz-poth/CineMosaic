@@ -6,7 +6,7 @@ slint::include_modules!();
 mod mac;
 mod presets;
 mod tc;
-use presets::{PRESETS, apply_preset, apply_text_style, load_presets, preset_json, preset_menu, store_presets, text_style};
+use presets::{PRESETS, apply_preset, default_row, load_presets, preset_json, preset_menu, row_style, store_presets};
 use tc::{clipboard_text, tc_edit, tc_parts, tc_pasted};
 use mac::color_panel;
 #[cfg(target_os = "macos")]
@@ -56,12 +56,8 @@ struct State {
     project_saved: Option<serde_json::Value>,
     /// an opened project's shots and stills, waiting for its source to be read again
     carry: Option<Carry>,
-    /// headline font a project or preset asked for, by name, until the font list is loaded
-    font_wanted: Option<String>,
-    /// text elements of the sheet: words and style (preset keys); the open one is edited in the Text tab's fields
-    /// and written back here before anything reads the list (`store_open`)
-    texts: Vec<(String, serde_json::Value)>,
-    text_open: usize,
+    /// fonts already reported missing (each named once)
+    fonts_missing: Vec<String>,
     /// for each text the sheet draws (`Sheet::texts`), its place in `texts`
     text_index: Vec<usize>,
     /// photomosaic: the main picture; the colour patterns of the stills (from the preview copies, in the picture
@@ -794,27 +790,107 @@ fn show_palettes(app: &AppWindow, s: &Settings) {
     app.set_bg_palette(swatches(2));
 }
 
-/// Colour `k` (0 frame line, 1 text, 2 background, 3 text shadow) as typed.
+/// Colour `k` of the sheet (0 frame line, 2 background) as typed; texts have theirs in their rows.
 fn color_of(app: &AppWindow, k: i32) -> SharedString {
-    [AppWindow::get_line_color, AppWindow::get_head_color, AppWindow::get_bg_color, AppWindow::get_sh_color][k.clamp(0, 3) as usize](app)
+    if k == 2 { app.get_bg_color() } else { app.get_line_color() }
 }
 
 fn set_color(app: &AppWindow, k: i32, v: SharedString) {
-    [AppWindow::set_line_color, AppWindow::set_head_color, AppWindow::set_bg_color, AppWindow::set_sh_color][k.clamp(0, 3) as usize](app, v)
+    if k == 2 { app.set_bg_color(v) } else { app.set_line_color(v) }
 }
 
 /// The chosen preset of colour `k` (-1: none).
 fn slot_of(app: &AppWindow, k: i32) -> i32 {
-    [AppWindow::get_line_slot, AppWindow::get_head_slot, AppWindow::get_bg_slot, AppWindow::get_sh_slot][k.clamp(0, 3) as usize](app)
+    if k == 2 { app.get_bg_slot() } else { app.get_line_slot() }
 }
 
 fn set_slot(app: &AppWindow, k: i32, i: i32) {
-    [AppWindow::set_line_slot, AppWindow::set_head_slot, AppWindow::set_bg_slot, AppWindow::set_sh_slot][k.clamp(0, 3) as usize](app, i)
+    if k == 2 { app.set_bg_slot(i) } else { app.set_line_slot(i) }
 }
 
-/// Which presets colour `k` uses: the shadow shares the text's.
+/// Which presets colour `k` uses (0 frame line, 1 texts and their shadows, 2 background).
 fn palette_of(k: i32) -> usize {
-    [0, 1, 2, 1][k.clamp(0, 3) as usize]
+    k.clamp(0, 2) as usize
+}
+
+/// The text rows of the Text tab.
+fn text_rows(app: &AppWindow) -> Vec<TextRow> {
+    use slint::Model;
+    app.get_texts().iter().collect()
+}
+
+/// Replaces the text rows: rows that stay the same are changed in place (fields being typed in keep their focus),
+/// a new count builds the list again.
+fn set_text_rows(app: &AppWindow, rows: Vec<TextRow>) {
+    use slint::Model;
+    let model = app.get_texts();
+    if model.row_count() == rows.len() && model.as_any().is::<VecModel<TextRow>>() {
+        for (i, r) in rows.into_iter().enumerate() {
+            if model.row_data(i).as_ref() != Some(&r) {
+                model.set_row_data(i, r);
+            }
+        }
+    } else {
+        app.set_texts(ModelRc::new(VecModel::from(rows)));
+    }
+    let n = app.get_texts().row_count() as i32;
+    app.set_text_active(app.get_text_active().clamp(0, (n - 1).max(0)));
+}
+
+/// Changes text row `i` in place.
+fn with_text_row(app: &AppWindow, i: i32, f: impl FnOnce(&mut TextRow)) {
+    use slint::Model;
+    let model = app.get_texts();
+    let Some(mut r) = usize::try_from(i).ok().and_then(|i| model.row_data(i)) else { return };
+    f(&mut r);
+    if model.row_data(i as usize).as_ref() != Some(&r) {
+        model.set_row_data(i as usize, r);
+    }
+}
+
+/// The preset of a text's colour (`shadow`: its shadow's), -1 = none.
+fn text_slot(app: &AppWindow, value: &str) -> i32 {
+    use slint::Model;
+    let c = hex_color(value);
+    c.and_then(|c| app.get_head_palette().iter().position(|sw| hex_color(&sw.hex) == Some(c))).map_or(-1, |i| i as i32)
+}
+
+/// Every text's font name matched to the font list (once it is loaded); a font this Mac does not have is named once,
+/// then the standard font is used. Empty = the standard font.
+fn resolve_fonts(app: &AppWindow) {
+    if FONTS.with(|f| f.borrow().is_empty()) {
+        return; // still loading: show_fonts comes back here
+    }
+    let mut rows = text_rows(app);
+    for r in rows.iter_mut() {
+        let (found, fallback) = FONTS.with(|f| {
+            let names = f.borrow();
+            let d = default_font(&names);
+            (names.iter().position(|n| n.as_str() == r.font_name.as_str()), (d, names.get(d).cloned().unwrap_or_default()))
+        });
+        match found {
+            Some(i) => r.font = i as i32,
+            None => {
+                let name = r.font_name.to_string();
+                if !name.is_empty() && with_state(app, |st| !st.borrow().fonts_missing.contains(&name)) {
+                    with_state(app, |st| st.borrow_mut().fonts_missing.push(name.clone()));
+                    log::write(&format!("font not installed: {name}"));
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_title(tr(["Font not installed", "Schrift nicht installiert", "Police non installée", "Fuente no instalada"]))
+                        .set_description(
+                            tr(["The font “{f}” cannot be loaded – it is not installed on this Mac. The text is set in the standard font, {d}, instead.", "Die Schrift „{f}“ lässt sich nicht laden – sie ist auf diesem Mac nicht installiert. Der Text wird deshalb in der Standardschrift {d} gesetzt.", "La police « {f} » ne peut pas être chargée – elle n’est pas installée sur ce Mac. Le texte utilise donc la police standard, {d}.", "No se puede cargar la fuente «{f}»: no está instalada en este Mac. Por eso el texto usa la fuente estándar, {d}."])
+                                .replace("{f}", &name)
+                                .replace("{d}", &fallback.1),
+                        )
+                        .show();
+                }
+                r.font = fallback.0 as i32;
+                r.font_name = fallback.1.into();
+            }
+        }
+    }
+    set_text_rows(app, rows);
 }
 
 /// The chosen preset follows the colour (a preset or project brings its own): the preset with this colour, or none.
@@ -825,9 +901,9 @@ fn match_slots(app: &AppWindow) {
         c.and_then(|c| pal.iter().position(|sw| hex_color(&sw.hex) == Some(c))).map_or(-1, |i| i as i32)
     };
     app.set_line_slot(slot(app.get_line_palette(), app.get_line_color()));
-    app.set_head_slot(slot(app.get_head_palette(), app.get_head_color()));
     app.set_bg_slot(slot(app.get_bg_palette(), app.get_bg_color()));
-    app.set_sh_slot(slot(app.get_head_palette(), app.get_sh_color()));
+    let rows = text_rows(app).into_iter().map(|r| TextRow { slot: text_slot(app, &r.color), sh_slot: text_slot(app, &r.sh_color), ..r }).collect();
+    set_text_rows(app, rows);
 }
 
 /// Preset `slot` of palette `k` gets colour `c`; every window shows it. `save`: write the settings now (the colour
@@ -872,26 +948,27 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
     } else {
         None
     };
-    let swatch = |c: Option<[u8; 3]>, set: fn(&AppWindow, slint::Color)| {
-        if let Some([r, g, b]) = c {
-            set(app, slint::Color::from_rgb_u8(r, g, b));
-        }
-    };
-    swatch(hex_color(&app.get_head_color()), AppWindow::set_head_swatch);
-    swatch(hex_color(&app.get_sh_color()), AppWindow::set_sh_swatch);
     let global = whole(&app.get_global_angle(), "global-angle").and_then(|v| if (-360.0..=360.0).contains(&v) { Ok(v) } else { Err("global-angle") })?;
-    store_open(app);
-    let (texts, open) = with_state(app, |st| (st.borrow().texts.clone(), st.borrow().text_open));
+    // the header titles and colour dots follow what is typed (rows change in place: focus and dragging stay)
+    let rows: Vec<TextRow> = text_rows(app)
+        .into_iter()
+        .map(|r| {
+            let dot = |s: &str, old: slint::Color| hex_color(s).map_or(old, |[r, g, b]| slint::Color::from_rgb_u8(r, g, b));
+            TextRow { title: r.words.lines().next().unwrap_or("").trim().into(), swatch: dot(&r.color, r.swatch), sh_swatch: dot(&r.sh_color, r.sh_swatch), ..r }
+        })
+        .collect();
+    set_text_rows(app, rows.clone());
+    let open = app.get_text_active().max(0) as usize;
     sheet.texts.clear();
     let mut index = vec![];
-    for (k, (text, style)) in texts.iter().enumerate() {
-        match text_from(style, text, per, global) {
+    for (k, r) in rows.iter().enumerate() {
+        match text_from(&row_style(r), &r.words, per, global) {
             Ok(Some(t)) => {
                 sheet.texts.push(t);
                 index.push(k);
             }
             Ok(None) => {}
-            // the open text names its wrong field; a closed one with a wrong value (an odd preset) is left out
+            // the active text names its wrong field; another with a wrong value (an odd preset) is left out
             Err(field) if k == open => return Err(field),
             Err(_) => {}
         }
@@ -956,52 +1033,9 @@ fn text_from(v: &serde_json::Value, text: &str, per: f64, global_angle: f64) -> 
     }))
 }
 
-/// The words of every text, the open one as its field shows it now.
+/// The words of every text.
 fn text_words(app: &AppWindow) -> Vec<String> {
-    let open = app.get_headline().to_string();
-    with_state(app, |st| {
-        let st = st.borrow();
-        st.texts.iter().enumerate().map(|(k, t)| if k == st.text_open { open.clone() } else { t.0.clone() }).collect()
-    })
-}
-
-/// Writes the Text tab's fields back into the open text.
-fn store_open(app: &AppWindow) {
-    let (text, style) = (app.get_headline().to_string(), text_style(app));
-    with_state(app, |st| {
-        let mut st = st.borrow_mut();
-        let k = st.text_open;
-        if let Some(t) = st.texts.get_mut(k) {
-            *t = (text, style);
-        }
-    });
-}
-
-/// Fills the Text tab's fields from the open text, and the list of texts.
-fn load_open(app: &AppWindow) {
-    let (text, style, k) = with_state(app, |st| {
-        let mut st = st.borrow_mut();
-        if st.texts.is_empty() {
-            st.texts.push((String::new(), serde_json::json!({})));
-        }
-        st.text_open = st.text_open.min(st.texts.len() - 1);
-        let k = st.text_open;
-        (st.texts[k].0.clone(), st.texts[k].1.clone(), k)
-    });
-    app.set_headline(text.into());
-    apply_text_style(app, &style);
-    app.set_text_open(k as i32);
-    show_texts(app);
-}
-
-/// The headers of the text list: the first line of each text ("" = still empty).
-fn show_texts(app: &AppWindow) {
-    let open = app.get_headline().to_string();
-    let titles: Vec<SharedString> = with_state(app, |st| {
-        let st = st.borrow();
-        st.texts.iter().enumerate().map(|(k, t)| if k == st.text_open { &open } else { &t.0 }).map(|t| t.lines().next().unwrap_or("").trim().into()).collect()
-    });
-    app.set_text_titles(ModelRc::new(VecModel::from(titles)));
+    text_rows(app).iter().map(|r| r.words.to_string()).collect()
 }
 
 /// Everything the sheet needs from the fields: sheet with its decoration and the picture format.
@@ -1128,10 +1162,9 @@ fn show_fonts(app: &AppWindow) {
         let names = f.borrow();
         let model: Vec<SharedString> = names.iter().map(|n| n.as_str().into()).collect();
         app.set_fonts(ModelRc::new(VecModel::from(model)));
-        app.set_font(default_font(&names) as i32);
     });
-    // a project or preset opened while the fonts were still loading gets its font now
-    apply_font(app);
+    // texts set up while the fonts were still loading get theirs now
+    resolve_fonts(app);
 }
 
 /// The standard headline font: Helvetica Neue, else Helvetica, else Arial, else the first.
@@ -1139,36 +1172,6 @@ fn default_font(names: &[String]) -> usize {
     ["Helvetica Neue", "Helvetica", "Arial"].iter().find_map(|w| names.iter().position(|n| n == w)).unwrap_or(0)
 }
 
-/// Sets the font a project or preset asked for, by name, once the font list is loaded. A font this Mac does not
-/// have: first say so (with its name), then take the standard font.
-fn apply_font(app: &AppWindow) {
-    if FONTS.with(|f| f.borrow().is_empty()) {
-        return; // still loading: show_fonts comes back here
-    }
-    let Some(name) = with_state(app, |st| st.borrow_mut().font_wanted.take()) else { return };
-    let (found, fallback) = FONTS.with(|f| {
-        let names = f.borrow();
-        let d = default_font(&names);
-        (names.iter().position(|n| *n == name), (d, names.get(d).cloned().unwrap_or_default()))
-    });
-    match found {
-        Some(i) => app.set_font(i as i32),
-        None => {
-            log::write(&format!("font not installed: {name}"));
-            rfd::MessageDialog::new()
-                .set_level(rfd::MessageLevel::Warning)
-                .set_title(tr(["Font not installed", "Schrift nicht installiert", "Police non installée", "Fuente no instalada"]))
-                .set_description(
-                    tr(["The font “{f}” cannot be loaded – it is not installed on this Mac. The headline is set in the standard font, {d}, instead.", "Die Schrift „{f}“ lässt sich nicht laden – sie ist auf diesem Mac nicht installiert. Die Headline wird deshalb in der Standardschrift {d} gesetzt.", "La police « {f} » ne peut pas être chargée – elle n’est pas installée sur ce Mac. Le titre utilise donc la police standard, {d}.", "No se puede cargar la fuente «{f}»: no está instalada en este Mac. Por eso el título usa la fuente estándar, {d}."])
-                        .replace("{f}", &name)
-                        .replace("{d}", &fallback.1),
-                )
-                .show();
-            app.set_font(fallback.0 as i32);
-        }
-    }
-    refresh(app);
-}
 
 /// Picture format to crop to: None = full frame; Err = width : height is not a format.
 fn read_picture(app: &AppWindow) -> Result<Option<f64>, &'static str> {
@@ -1270,7 +1273,6 @@ fn refresh(app: &AppWindow) {
         }
     };
     app.set_invalid("".into());
-    show_texts(app);
     if app.get_picture() == 0 {
         show_picture(app);
     }
@@ -1306,7 +1308,7 @@ fn refresh(app: &AppWindow) {
         app.set_trim_w((t.w / w as f64) as f32);
         app.set_trim_h((t.h / h as f64) as f32);
         // every text's box (to click it open), and the open one's for dragging
-        let (index, open, count) = (st.text_index.clone(), st.text_open, st.texts.len());
+        let (index, open, count) = (st.text_index.clone(), app.get_text_active().max(0) as usize, slint::Model::row_count(&app.get_texts()));
         let frac = |r: &layout::Rect| TextBox { x: (r.x / w as f64) as f32, y: (r.y / h as f64) as f32, w: (r.w / w as f64) as f32, h: (r.h / h as f64) as f32 };
         let mut boxes = vec![TextBox { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }; count];
         for t in &plan.texts {
@@ -2177,18 +2179,15 @@ fn open_project(app: &AppWindow, path: PathBuf) {
     log::write(&format!("project opened: {}", file_name(&path)));
     apply_preset(app, &p.look);
     // the project's texts, in the styles its look gave them (a text without one takes the last style)
-    store_open(app);
-    with_state(app, |st| {
-        let mut st = st.borrow_mut();
-        let last = st.texts.last().map(|t| t.1.clone()).unwrap_or_default();
-        st.texts.resize(p.texts.len().max(1), (String::new(), last));
-        for (t, words) in st.texts.iter_mut().zip(&p.texts) {
-            t.0 = words.clone();
-        }
-        st.text_open = 0;
-        st.mosaic_target = p.mosaic.clone().filter(|m| m.width() > 0 && m.height() > 0).map(|m| Arc::new(mosaic_size(m)));
-    });
-    load_open(app);
+    let mut rows = text_rows(app);
+    let last = rows.last().cloned().unwrap_or_else(default_row);
+    rows.resize(p.texts.len().max(1), last);
+    for (r, words) in rows.iter_mut().zip(&p.texts) {
+        r.words = words.as_str().into();
+    }
+    set_text_rows(app, rows);
+    app.set_text_active(0);
+    with_state(app, |st| st.borrow_mut().mosaic_target = p.mosaic.clone().filter(|m| m.width() > 0 && m.height() > 0).map(|m| Arc::new(mosaic_size(m))));
     app.set_mosaic_name(if p.mosaic.is_some() { tr(["Kept in the project", "Im Projekt gesichert", "Gardée dans le projet", "Guardada en el proyecto"]) } else { String::new() }.into());
     app.set_mode(p.mode.clamp(0, 1));
     let name = |o: &Option<PathBuf>| o.as_deref().map(file_name).unwrap_or_default();
@@ -2437,8 +2436,8 @@ fn new_window(ctx: &Rc<Ctx>) -> Result<AppWindow, slint::PlatformError> {
     FRONT.with(|f| f.set(app.get_win_id()));
     wire_shared(&app, ctx);
     wire_window(&app, ctx);
-    // one empty text to start with, in the fields' standard style
-    with_state(&app, |st| st.borrow_mut().texts.push((String::new(), text_style(&app))));
+    // one empty text to start with, in the standard style
+    app.set_texts(ModelRc::new(VecModel::from(vec![default_row()])));
     show_palettes(&app, &ctx.settings.borrow());
     match_slots(&app);
     show_fonts(&app);
@@ -3054,14 +3053,30 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
             }
         }
     });
-    // the list of texts: open one (the fields show it), add one below the open one, remove one
-    app.on_text_open_at({
+    // the list of texts: each opens and closes on its own; the one last touched is active (dragged in the preview)
+    app.on_text_edited({
         let weak = app.as_weak();
         move |i| {
             let Some(app) = weak.upgrade() else { return };
-            store_open(&app);
-            with_state(&app, |st| st.borrow_mut().text_open = i.max(0) as usize);
-            load_open(&app);
+            app.set_text_active(i);
+            refresh(&app);
+        }
+    });
+    app.on_text_toggle({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            with_text_row(&app, i, |r| r.open = !r.open);
+            app.set_text_active(i);
+            refresh(&app);
+        }
+    });
+    app.on_text_pick({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            with_text_row(&app, i, |r| r.open = true);
+            app.set_text_active(i);
             refresh(&app);
         }
     });
@@ -3069,19 +3084,17 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move || {
             let Some(app) = weak.upgrade() else { return };
-            store_open(&app);
-            // the open text's style, a little lower, so the new one does not lie on top of it
+            // the active text's style, a little lower, so the new one does not lie on top of it
             let per = mm_per_px(&app);
-            let mut style = text_style(&app);
-            let dy = app.get_head_dy().trim().parse::<i64>().unwrap_or(0) + (12.0 / per).round() as i64;
-            style["head-dy"] = dy.to_string().into();
-            with_state(&app, |st| {
-                let mut st = st.borrow_mut();
-                let at = st.text_open + 1;
-                st.texts.insert(at, (String::new(), style));
-                st.text_open = at;
-            });
-            load_open(&app);
+            let mut rows = text_rows(&app);
+            let at = (app.get_text_active().max(0) as usize).min(rows.len().saturating_sub(1));
+            let base = rows.get(at).cloned().unwrap_or_else(default_row);
+            let dy = base.dy.trim().parse::<i64>().unwrap_or(0) + (12.0 / per).round() as i64;
+            let new = TextRow { words: "".into(), title: "".into(), open: true, dy: dy.to_string().into(), ..base };
+            let at = if rows.is_empty() { 0 } else { at + 1 };
+            rows.insert(at, new);
+            set_text_rows(&app, rows);
+            app.set_text_active(at as i32);
             refresh(&app);
         }
     });
@@ -3089,42 +3102,106 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move |i| {
             let Some(app) = weak.upgrade() else { return };
-            store_open(&app);
-            with_state(&app, |st| {
-                let mut st = st.borrow_mut();
-                let i = i.max(0) as usize;
-                if i < st.texts.len() {
-                    st.texts.remove(i);
-                }
-                if st.text_open > i || st.text_open >= st.texts.len() {
-                    st.text_open = st.text_open.saturating_sub(1);
-                }
-            });
-            load_open(&app);
+            let mut rows = text_rows(&app);
+            if (i as usize) < rows.len() {
+                rows.remove(i as usize);
+            }
+            let active = app.get_text_active();
+            set_text_rows(&app, rows);
+            if active > i {
+                app.set_text_active(active - 1);
+            }
             refresh(&app);
         }
     });
-    // headline anchor: a sensible move for the new point (inside the sheet), then draw
-    app.on_anchor_chosen({
+    // the anchor of a text: a sensible move for the new point (inside the sheet), then draw
+    app.on_text_anchor({
         let weak = app.as_weak();
-        move |i| {
+        move |t, i| {
             let Some(app) = weak.upgrade() else { return };
-            app.set_head_anchor(i);
             let per = mm_per_px(&app);
-            app.set_head_dx(in_unit([10.0, 0.0, -10.0][i as usize % 3], per));
-            app.set_head_dy(in_unit([8.0, 0.0, -8.0][(i as usize / 3).min(2)], per));
+            with_text_row(&app, t, |r| {
+                r.anchor = i;
+                r.dx = in_unit([10.0, 0.0, -10.0][i as usize % 3], per);
+                r.dy = in_unit([8.0, 0.0, -8.0][(i as usize / 3).min(2)], per);
+            });
+            app.set_text_active(t);
             refresh(&app);
+        }
+    });
+    app.on_text_font({
+        let weak = app.as_weak();
+        move |t| {
+            let Some(app) = weak.upgrade() else { return };
+            with_text_row(&app, t, |r| r.font_name = FONTS.with(|f| f.borrow().get(r.font as usize).cloned()).unwrap_or_default().into());
+            app.set_text_active(t);
+            refresh(&app);
+        }
+    });
+    app.on_text_move({
+        let weak = app.as_weak();
+        move |dx, dy| {
+            let Some(app) = weak.upgrade() else { return };
+            with_text_row(&app, app.get_text_active(), |r| {
+                r.dx = dx;
+                r.dy = dy;
+            });
+            refresh(&app);
+        }
+    });
+    // colours of a text (k 0) and its shadow (k 1): the text palette
+    app.on_text_color_swatch({
+        let weak = app.as_weak();
+        move |t, k, i| {
+            let Some(app) = weak.upgrade() else { return };
+            let Some(sw) = slint::Model::row_data(&app.get_head_palette(), i as usize) else { return };
+            with_text_row(&app, t, |r| if k == 0 { (r.color, r.slot) = (sw.hex, i) } else { (r.sh_color, r.sh_slot) = (sw.hex, i) });
+            app.set_text_active(t);
+            refresh(&app);
+        }
+    });
+    app.on_text_color_panel({
+        let (weak, ctx) = (app.as_weak(), ctx.clone());
+        move |t, k| {
+            let Some(app) = weak.upgrade() else { return };
+            let Some(row) = slint::Model::row_data(&app.get_texts(), t as usize) else { return };
+            let value = if k == 0 { row.color } else { row.sh_color };
+            let (weak, ctx, saver) = (weak.clone(), ctx.clone(), ctx.clone());
+            color_panel::open(
+                hex_color(&value).unwrap_or([0, 0, 0]),
+                Rc::new(move |c| {
+                    let Some(app) = weak.upgrade() else { return };
+                    let Some(row) = slint::Model::row_data(&app.get_texts(), t as usize) else { return };
+                    if let Ok(slot) = usize::try_from(if k == 0 { row.slot } else { row.sh_slot }) {
+                        set_palette_entry(&ctx.settings, 1, slot, c, false);
+                    }
+                    with_text_row(&app, t, |r| if k == 0 { r.color = hex_text(c).into() } else { r.sh_color = hex_text(c).into() });
+                    refresh(&app);
+                }),
+                Rc::new(move || save_settings(&saver.settings.borrow())),
+            );
+        }
+    });
+    app.on_text_color_typed({
+        let (weak, ctx) = (app.as_weak(), ctx.clone());
+        move |t, k| {
+            let Some(app) = weak.upgrade() else { return };
+            let Some(row) = slint::Model::row_data(&app.get_texts(), t as usize) else { return };
+            let (value, slot) = if k == 0 { (row.color, row.slot) } else { (row.sh_color, row.sh_slot) };
+            if let (Some(c), Ok(slot)) = (hex_color(&value), usize::try_from(slot)) {
+                set_palette_entry(&ctx.settings, 1, slot, c, true);
+            }
         }
     });
     // a letter in the font list: the next family starting with it (after the current one, wrapping round)
     app.on_jump_font({
         let weak = app.as_weak();
-        move |text| {
-            let Some(app) = weak.upgrade() else { return -1 };
+        move |current, text| {
+            let Some(_app) = weak.upgrade() else { return -1 };
             let key = text.to_lowercase();
             FONTS.with(|f| {
                 let f = f.borrow();
-                let start = app.get_font().max(0) as usize + 1;
+                let start = current.max(0) as usize + 1;
                 (0..f.len()).map(|k| (start + k) % f.len()).find(|&k| f[k].to_lowercase().starts_with(&key)).map_or(-1, |k| k as i32)
             })
         }

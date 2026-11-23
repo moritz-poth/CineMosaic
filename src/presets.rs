@@ -71,80 +71,109 @@ pub fn preset_json(app: &AppWindow) -> serde_json::Value {
     })
 }
 
-/// Style and place of the open text element (the fields of the Text tab), without its words; the font by name.
-pub fn text_style(app: &AppWindow) -> serde_json::Value {
-    let font = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned()).unwrap_or_default();
+/// Style and place of a text element (its fields), without its words; the font by name.
+pub fn row_style(r: &TextRow) -> serde_json::Value {
+    let font = if r.font_name.is_empty() { FONTS.with(|f| f.borrow().get(r.font as usize).cloned()).unwrap_or_default() } else { r.font_name.to_string() };
     serde_json::json!({
-        "font": font, "head-size": app.get_head_size().as_str(), "head-bold": app.get_head_bold(), "head-italic": app.get_head_italic(),
-        "head-color": app.get_head_color().as_str(), "head-anchor": app.get_head_anchor(),
-        "head-dx": app.get_head_dx().as_str(), "head-dy": app.get_head_dy().as_str(),
-        "head-pad": [app.get_head_pad_t().as_str(), app.get_head_pad_r().as_str(), app.get_head_pad_b().as_str(), app.get_head_pad_l().as_str()],
-        "head-wrap": app.get_head_wrap(), "head-lines": app.get_head_lines(),
-        "sh-on": app.get_sh_on(), "sh-blend": app.get_sh_blend(), "sh-color": app.get_sh_color().as_str(), "sh-opacity": app.get_sh_opacity().as_str(),
-        "sh-angle": app.get_sh_angle().as_str(), "sh-global": app.get_sh_global(), "sh-distance": app.get_sh_distance().as_str(),
-        "sh-spread": app.get_sh_spread().as_str(), "sh-size": app.get_sh_size().as_str(), "sh-contour": app.get_sh_contour(),
-        "sh-aa": app.get_sh_aa(), "sh-noise": app.get_sh_noise().as_str(), "sh-knock": app.get_sh_knock(),
+        "font": font, "head-size": r.size.as_str(), "head-bold": r.bold, "head-italic": r.italic,
+        "head-color": r.color.as_str(), "head-anchor": r.anchor, "head-dx": r.dx.as_str(), "head-dy": r.dy.as_str(),
+        "head-pad": [r.pad_t.as_str(), r.pad_r.as_str(), r.pad_b.as_str(), r.pad_l.as_str()],
+        "head-wrap": r.wrap, "head-lines": r.lines,
+        "sh-on": r.sh_on, "sh-blend": r.sh_blend, "sh-color": r.sh_color.as_str(), "sh-opacity": r.sh_opacity.as_str(),
+        "sh-angle": r.sh_angle.as_str(), "sh-global": r.sh_global, "sh-distance": r.sh_distance.as_str(),
+        "sh-spread": r.sh_spread.as_str(), "sh-size": r.sh_size.as_str(), "sh-contour": r.sh_contour,
+        "sh-aa": r.sh_aa, "sh-noise": r.sh_noise.as_str(), "sh-knock": r.sh_knock,
     })
 }
 
-/// The styles of all text elements, the open one as its fields show it now.
+/// A new text's fields before anything changes them (the font is the standard one once the list is loaded).
+pub fn default_row() -> TextRow {
+    let t = |s: &str| SharedString::from(s);
+    TextRow {
+        open: true,
+        size: t("24"),
+        color: t("#000000"),
+        swatch: slint::Color::from_rgb_u8(0, 0, 0),
+        anchor: 1,
+        dx: t("0"),
+        dy: t("94"),
+        pad_t: t("24"),
+        pad_r: t("24"),
+        pad_b: t("24"),
+        pad_l: t("24"),
+        lines: 1,
+        sh_blend: 2,
+        sh_color: t("#000000"),
+        sh_swatch: slint::Color::from_rgb_u8(0, 0, 0),
+        sh_opacity: t("75"),
+        sh_angle: t("120"),
+        sh_global: true,
+        sh_distance: t("12"),
+        sh_spread: t("0"),
+        sh_size: t("18"),
+        sh_noise: t("0"),
+        sh_knock: true,
+        ..Default::default()
+    }
+}
+
+/// `base` with the keys of a style set (missing or wrong keys keep the field); a font comes by name and is matched
+/// to the font list by `resolve_fonts`.
+pub fn style_row(v: &serde_json::Value, base: TextRow) -> TextRow {
+    let mut r = base;
+    let int = |k: &str, max: i64| v.get(k).and_then(|x| x.as_i64()).filter(|n| (0..=max).contains(n)).map(|n| n as i32);
+    let b = |k: &str| v.get(k).and_then(|x| x.as_bool());
+    let t = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|s| s.len() < 100).map(SharedString::from);
+    if let Some(name) = v.get("font").and_then(|x| x.as_str()).filter(|n| !n.is_empty() && n.len() < 200) {
+        r.font_name = name.into();
+    }
+    macro_rules! set {
+        ($f:ident, $e:expr) => {
+            if let Some(x) = $e {
+                r.$f = x;
+            }
+        };
+    }
+    set!(size, t("head-size"));
+    set!(bold, b("head-bold"));
+    set!(italic, b("head-italic"));
+    set!(color, t("head-color"));
+    set!(anchor, int("head-anchor", 8));
+    set!(dx, t("head-dx"));
+    set!(dy, t("head-dy"));
+    if let Some(p) = v.get("head-pad").and_then(|x| x.as_array()).filter(|p| p.len() == 4) {
+        let get = |k: usize| p[k].as_str().filter(|s| s.len() < 10).map(SharedString::from);
+        set!(pad_t, get(0));
+        set!(pad_r, get(1));
+        set!(pad_b, get(2));
+        set!(pad_l, get(3));
+    }
+    set!(wrap, b("head-wrap"));
+    set!(lines, int("head-lines", 2));
+    set!(sh_on, b("sh-on"));
+    set!(sh_blend, int("sh-blend", layout::Blend::ALL.len() as i64 - 1));
+    set!(sh_color, t("sh-color"));
+    set!(sh_opacity, t("sh-opacity"));
+    set!(sh_angle, t("sh-angle"));
+    set!(sh_global, b("sh-global"));
+    set!(sh_distance, t("sh-distance"));
+    set!(sh_spread, t("sh-spread"));
+    set!(sh_size, t("sh-size"));
+    set!(sh_contour, int("sh-contour", layout::Contour::ALL.len() as i64 - 1));
+    set!(sh_aa, b("sh-aa"));
+    set!(sh_noise, t("sh-noise"));
+    set!(sh_knock, b("sh-knock"));
+    r
+}
+
+/// The styles of all text elements.
 pub fn text_styles(app: &AppWindow) -> Vec<serde_json::Value> {
-    let open = text_style(app);
-    with_state(app, |st| {
-        let st = st.borrow();
-        st.texts.iter().enumerate().map(|(k, t)| if k == st.text_open { open.clone() } else { t.1.clone() }).collect()
-    })
+    text_rows(app).iter().map(row_style).collect()
 }
 
 /// Keys of a text style; an old preset has them at the top level (one headline).
 fn is_text_key(k: &str) -> bool {
     k == "font" || k.starts_with("head-") || k.starts_with("sh-")
-}
-
-/// Sets the Text tab fields from a style. Missing or wrong keys keep the field as it is.
-pub fn apply_text_style(app: &AppWindow, v: &serde_json::Value) {
-    let int = |k: &str, max: i64, set: &dyn Fn(i32)| {
-        if let Some(n) = v.get(k).and_then(|x| x.as_i64()).filter(|n| (0..=max).contains(n)) {
-            set(n as i32)
-        }
-    };
-    let boolean = |k: &str, set: &dyn Fn(bool)| v.get(k).and_then(|x| x.as_bool()).into_iter().for_each(set);
-    let text = |k: &str, set: &dyn Fn(SharedString)| v.get(k).and_then(|x| x.as_str()).filter(|s| s.len() < 100).into_iter().for_each(|s| set(s.into()));
-    if let Some(name) = v.get("font").and_then(|x| x.as_str()).filter(|n| !n.is_empty()) {
-        with_state(app, |st| st.borrow_mut().font_wanted = Some(name.to_string()));
-        apply_font(app);
-    }
-    text("head-size", &|s| app.set_head_size(s));
-    boolean("head-bold", &|b| app.set_head_bold(b));
-    boolean("head-italic", &|b| app.set_head_italic(b));
-    text("head-color", &|s| app.set_head_color(s));
-    int("head-anchor", 8, &|n| app.set_head_anchor(n));
-    text("head-dx", &|s| app.set_head_dx(s));
-    text("head-dy", &|s| app.set_head_dy(s));
-    if let Some(p) = v.get("head-pad").and_then(|x| x.as_array()).filter(|p| p.len() == 4) {
-        let sets: [fn(&AppWindow, SharedString); 4] = [AppWindow::set_head_pad_t, AppWindow::set_head_pad_r, AppWindow::set_head_pad_b, AppWindow::set_head_pad_l];
-        for (x, set) in p.iter().zip(sets) {
-            if let Some(t) = x.as_str().filter(|t| t.len() < 10) {
-                set(app, t.into());
-            }
-        }
-    }
-    boolean("head-wrap", &|b| app.set_head_wrap(b));
-    int("head-lines", 2, &|n| app.set_head_lines(n));
-    boolean("sh-on", &|b| app.set_sh_on(b));
-    int("sh-blend", layout::Blend::ALL.len() as i64 - 1, &|n| app.set_sh_blend(n));
-    text("sh-color", &|s| app.set_sh_color(s));
-    text("sh-opacity", &|s| app.set_sh_opacity(s));
-    text("sh-angle", &|s| app.set_sh_angle(s));
-    boolean("sh-global", &|b| app.set_sh_global(b));
-    text("sh-distance", &|s| app.set_sh_distance(s));
-    text("sh-spread", &|s| app.set_sh_spread(s));
-    text("sh-size", &|s| app.set_sh_size(s));
-    int("sh-contour", layout::Contour::ALL.len() as i64 - 1, &|n| app.set_sh_contour(n));
-    boolean("sh-aa", &|b| app.set_sh_aa(b));
-    text("sh-noise", &|s| app.set_sh_noise(s));
-    boolean("sh-knock", &|b| app.set_sh_knock(b));
-    match_slots(app);
 }
 
 /// Styles from a preset or project look: by place onto the texts there are (more styles add empty texts, texts
@@ -157,23 +186,16 @@ fn apply_text_styles(app: &AppWindow, v: &serde_json::Value) {
             if flat.is_empty() { vec![] } else { vec![flat.into()] }
         }
     };
-    store_open(app);
-    with_state(app, |st| {
-        let mut st = st.borrow_mut();
-        for (k, style) in styles.into_iter().enumerate() {
-            let Some(new) = style.as_object() else { continue };
-            if k >= st.texts.len() {
-                let base = st.texts.last().map(|t| t.1.clone()).unwrap_or_default();
-                st.texts.push((String::new(), base));
-            }
-            if let Some(old) = st.texts[k].1.as_object_mut() {
-                old.extend(new.iter().filter(|(k, _)| is_text_key(k)).map(|(k, x)| (k.clone(), x.clone())));
-            } else {
-                st.texts[k].1 = style.clone();
-            }
+    let mut rows = text_rows(app);
+    for (k, style) in styles.iter().enumerate() {
+        if k >= rows.len() {
+            let base = TextRow { words: "".into(), title: "".into(), ..rows.last().cloned().unwrap_or_else(default_row) };
+            rows.push(base);
         }
-    });
-    load_open(app);
+        rows[k] = style_row(style, rows[k].clone());
+    }
+    set_text_rows(app, rows);
+    resolve_fonts(app);
 }
 
 /// Sets the fields from a preset. Missing or wrong keys keep the field as it is (older or newer presets).

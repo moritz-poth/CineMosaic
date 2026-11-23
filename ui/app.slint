@@ -18,6 +18,47 @@ export struct MasterRow {
     to: string,
 }
 
+// one text element of the Text tab with all its fields (values as typed; Rust reads them on every change)
+export struct TextRow {
+    open: bool,
+    // first line of the words, for the header
+    title: string,
+    words: string,
+    font: int,
+    // the font by name (kept when the font list is not loaded yet or the font is missing)
+    font-name: string,
+    size: string,
+    bold: bool,
+    italic: bool,
+    color: string,
+    swatch: color,
+    slot: int,
+    anchor: int,
+    dx: string,
+    dy: string,
+    pad-t: string,
+    pad-r: string,
+    pad-b: string,
+    pad-l: string,
+    wrap: bool,
+    lines: int,
+    sh-on: bool,
+    sh-blend: int,
+    sh-color: string,
+    sh-swatch: color,
+    sh-slot: int,
+    sh-opacity: string,
+    sh-angle: string,
+    sh-global: bool,
+    sh-distance: string,
+    sh-spread: string,
+    sh-size: string,
+    sh-contour: int,
+    sh-aa: bool,
+    sh-noise: string,
+    sh-knock: bool,
+}
+
 // where a text lies on the page, as fractions of the page (w 0 = nothing drawn)
 export struct TextBox {
     x: float,
@@ -1975,18 +2016,6 @@ export component AppWindow inherits SheetWindow {
     in-out property <string> line-color: "#000000";
     in property <color> line-swatch: black;
     in-out property <int> line-pattern;
-    in-out property <string> headline;
-    // headline anchor 0–8 (rows top / middle / bottom × left / centre / right) and its move in px of the sheet
-    in property <int> head-anchor: 1;
-    in-out property <string> head-dx: "0";
-    in-out property <string> head-dy: "94";
-    // space the stills keep from the headline, px of the sheet (24 px = the old 2 mm at 300 dpi); over the stills
-    // they can flow around it
-    in-out property <string> head-pad-t: "24";
-    in-out property <string> head-pad-r: "24";
-    in-out property <string> head-pad-b: "24";
-    in-out property <string> head-pad-l: "24";
-    in-out property <bool> head-wrap;
     // where Rust drew the headline and the trim area (the whole page without crop marks), as fractions of the page,
     // and the page width in px of the sheet (dragging, grid hits)
     in property <float> head-bx;
@@ -1998,20 +2027,13 @@ export component AppWindow inherits SheetWindow {
     in property <float> trim-y: 0;
     in property <float> trim-w: 1;
     in property <float> trim-h: 1;
-    callback anchor-chosen(int);
-    callback jump-font(string) -> int;
+    // a letter typed in a font list: the next family starting with it after `current`
+    callback jump-font(int, string) -> int;
     in property <[string]> fonts;
-    in-out property <int> font;
-    in-out property <string> head-size: "24";
-    in-out property <bool> head-bold;
-    in-out property <bool> head-italic;
-    in-out property <string> head-color: "#000000";
-    in property <color> head-swatch: black;
     // colour presets (Rust: settings, the same in every window) and the chosen one; 0 frame line, 1 headline
     in property <[Swatch]> line-palette;
     in property <[Swatch]> head-palette;
     in-out property <int> line-slot;
-    in-out property <int> head-slot;
     // photomosaic (Sheet tab): the stills rebuild a main picture (a file, or a still clicked in the preview)
     in-out property <bool> mosaic-on;
     in-out property <string> mosaic-cols: "40";
@@ -2027,33 +2049,29 @@ export component AppWindow inherits SheetWindow {
     in property <color> bg-swatch: white;
     in property <[Swatch]> bg-palette;
     in-out property <int> bg-slot;
-    // text elements (Text tab): one header per text, the open one is edited in the head-* fields
-    in property <[string]> text-titles;
-    in-out property <int> text-open;
+    // text elements (Text tab): every text its own row with all fields, open or closed on its own (user
+    // 2026-11-23: several open at once, all can be closed); the active one (last touched) is the one dragged in the
+    // preview and named by `invalid`
+    in-out property <[TextRow]> texts;
+    in-out property <int> text-active;
     in property <[TextBox]> text-boxes;
-    callback text-open-at(int);
+    // a field of text i changed (it becomes the active one)
+    callback text-edited(int);
+    callback text-toggle(int);
+    // a frame in the preview clicked: that text active and open
+    callback text-pick(int);
     callback text-add();
     callback text-remove(int);
-    // lines of the open text: 0 left, 1 centred, 2 right
-    in-out property <int> head-lines: 1;
-    // drop shadow of the open text, as Photoshop's layer style (defaults as there: Multiply, black, 75 %, 120°)
-    in-out property <bool> sh-on;
-    in-out property <int> sh-blend: 2;
-    in-out property <string> sh-color: "#000000";
-    in property <color> sh-swatch: black;
-    in-out property <int> sh-slot;
-    in-out property <string> sh-opacity: "75";
-    in-out property <string> sh-angle: "120";
-    in-out property <bool> sh-global: true;
+    callback text-anchor(int, int);
+    callback text-font(int);
+    // the active text dragged in the preview: its new X / Y
+    callback text-move(string, string);
+    // colours of text i: k 0 the text, 1 its shadow
+    callback text-color-swatch(int, int, int);
+    callback text-color-panel(int, int);
+    callback text-color-typed(int, int);
     // Use Global Light: one angle for every text that has it on (kept with the sheet)
     in-out property <string> global-angle: "120";
-    in-out property <string> sh-distance: "12";
-    in-out property <string> sh-spread: "0";
-    in-out property <string> sh-size: "18";
-    in-out property <int> sh-contour;
-    in-out property <bool> sh-aa;
-    in-out property <string> sh-noise: "0";
-    in-out property <bool> sh-knock: true;
     callback color-swatch(int, int);
     callback color-panel(int);
     callback color-typed(int);
@@ -2452,21 +2470,21 @@ export component AppWindow inherits SheetWindow {
                                 spacing: 6px;
                                 alignment: start;
                                 vertical-stretch: 1;
-                                // the texts: one header each, only the open one shows its fields (user 2026-11-23)
-                                for title[ti] in root.text-titles: VerticalLayout {
+                                // the texts: a header each; any number open at once, all can be closed (user 2026-11-23)
+                                for t[ti] in root.texts: VerticalLayout {
                                     spacing: 6px;
                                     TextHeader {
-                                        title: title != "" ? title : @tr("Text {}", ti + 1);
-                                        open: ti == root.text-open;
-                                        clicked => { root.text-open-at(ti); }
+                                        title: t.title != "" ? t.title : @tr("Text {}", ti + 1);
+                                        open: t.open;
+                                        clicked => { root.text-toggle(ti); }
                                         removed => { root.text-remove(ti); }
                                     }
-                                    if ti == root.text-open: VerticalLayout {
+                                    if t.open: VerticalLayout {
                                         spacing: 6px;
                                         FieldFrame {
                                             height: max(26px, head-input.preferred-height + 12px);
                                             border-color: head-input.has-focus ? Theme.accent : Theme.line;
-                                            if root.headline == "": Text {
+                                            if t.words == "": Text {
                                                 x: 8px;
                                                 y: 6px;
                                                 text: @tr("Text – Return starts a new line");
@@ -2478,12 +2496,12 @@ export component AppWindow inherits SheetWindow {
                                                 y: 6px;
                                                 width: parent.width - 16px;
                                                 height: parent.height - 12px;
-                                                text <=> root.headline;
+                                                text <=> t.words;
                                                 font-size: 12px;
                                                 color: Theme.text;
                                                 single-line: false;
                                                 accessible-label: @tr("Text");
-                                                edited => { root.sheet-changed(); }
+                                                edited => { root.text-edited(ti); }
                                             }
                                         }
                                         VerticalLayout {
@@ -2494,39 +2512,39 @@ export component AppWindow inherits SheetWindow {
                                                     width: 240px;
                                                     label: @tr("Font");
                                                     fonts: root.fonts;
-                                                    current <=> root.font;
-                                                    chosen => { root.sheet-changed(); }
-                                                    jump(t) => { return root.jump-font(t); }
+                                                    current <=> t.font;
+                                                    chosen => { root.text-font(ti); }
+                                                    jump(x) => { return root.jump-font(t.font, x); }
                                                 }
                                             }
                                             Row {
                                                 text: @tr("Size");
-                                                StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
-                                                StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
-                                                NumberField { text <=> root.head-size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
+                                                StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: t.bold; toggled => { t.bold = !t.bold; root.text-edited(ti); } }
+                                                StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: t.italic; toggled => { t.italic = !t.italic; root.text-edited(ti); } }
+                                                NumberField { text <=> t.size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: (root.invalid == "head-size" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                             }
                                             Row {
                                                 text: @tr("Lines");
                                                 Dropdown {
                                                     label: @tr("Lines");
                                                     items: [@tr("Left"), @tr("Centred"), @tr("Right")];
-                                                    current: root.head-lines;
-                                                    selected(i) => { root.head-lines = i; root.sheet-changed(); }
+                                                    current: t.lines;
+                                                    selected(i) => { t.lines = i; root.text-edited(ti); }
                                                 }
                                             }
                                             ColorRow {
-                                                text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color";
-                                                palette: root.head-palette; slot: root.head-slot;
-                                                edited => { root.color-typed(1); root.sheet-changed(); }
-                                                swatch(i) => { root.color-swatch(1, i); }
-                                    panel => { root.color-panel(1); }
+                                                text: @tr("Colour"); value <=> t.color; shown: t.swatch; invalid: (root.invalid == "head-color" && ti == root.text-active);
+                                                palette: root.head-palette; slot: t.slot;
+                                                edited => { root.text-color-typed(ti, 0); root.text-edited(ti); }
+                                                swatch(i) => { root.text-color-swatch(ti, 0, i); }
+                                    panel => { root.text-color-panel(ti, 0); }
                                             }
                                             HorizontalLayout {
                                                 spacing: 10px;
                                                 VerticalLayout {
                                                     spacing: 4px;
                                                     Text { text: @tr("Anchor"); font-size: 12px; color: Theme.text; }
-                                                    AnchorPicker { current: root.head-anchor; chosen(i) => { root.anchor-chosen(i); } }
+                                                    AnchorPicker { current: t.anchor; chosen(i) => { root.text-anchor(ti, i); } }
                                                 }
                                                 Rectangle { horizontal-stretch: 1; }
                                                 VerticalLayout {
@@ -2535,12 +2553,12 @@ export component AppWindow inherits SheetWindow {
                                                     HorizontalLayout {
                                                         spacing: 6px;
                                                         Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                                        NumberField { text <=> root.head-dx; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                                        NumberField { text <=> t.dx; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move right"); invalid: (root.invalid == "head-dx" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                     }
                                                     HorizontalLayout {
                                                         spacing: 6px;
                                                         Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                                        NumberField { text <=> root.head-dy; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                                        NumberField { text <=> t.dy; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move down"); invalid: (root.invalid == "head-dy" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                     }
                                                 }
                                             }
@@ -2549,19 +2567,19 @@ export component AppWindow inherits SheetWindow {
                                             Rectangle { height: 8px; }
                                             Row {
                                                 text: @tr("Space above · below");
-                                                NumberField { width: 78px; text <=> root.head-pad-t; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space above"); invalid: root.invalid == "head-pad-t"; edited => { root.sheet-changed(); } }
-                                                NumberField { width: 78px; text <=> root.head-pad-b; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space below"); invalid: root.invalid == "head-pad-b"; edited => { root.sheet-changed(); } }
+                                                NumberField { width: 78px; text <=> t.pad-t; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space above"); invalid: (root.invalid == "head-pad-t" && ti == root.text-active); edited => { root.text-edited(ti); } }
+                                                NumberField { width: 78px; text <=> t.pad-b; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space below"); invalid: (root.invalid == "head-pad-b" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                             }
                                             Row {
                                                 text: @tr("Space left · right");
-                                                NumberField { width: 78px; text <=> root.head-pad-l; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space left"); invalid: root.invalid == "head-pad-l"; edited => { root.sheet-changed(); } }
-                                                NumberField { width: 78px; text <=> root.head-pad-r; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space right"); invalid: root.invalid == "head-pad-r"; edited => { root.sheet-changed(); } }
+                                                NumberField { width: 78px; text <=> t.pad-l; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space left"); invalid: (root.invalid == "head-pad-l" && ti == root.text-active); edited => { root.text-edited(ti); } }
+                                                NumberField { width: 78px; text <=> t.pad-r; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space right"); invalid: (root.invalid == "head-pad-r" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                             }
                                             Row {
                                                 text: @tr("Stills around the text");
                                                 VerticalLayout {
                                                     alignment: center;
-                                                    Switch { on: root.head-wrap; label: @tr("Stills around the text"); toggled => { root.head-wrap = !root.head-wrap; root.sheet-changed(); } }
+                                                    Switch { on: t.wrap; label: @tr("Stills around the text"); toggled => { t.wrap = !t.wrap; root.text-edited(ti); } }
                                                 }
                                             }
                                             Para { text: @tr("The space is what the stills keep from the text. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the text, leave its place free and go on in the next cells."); }
@@ -2570,80 +2588,80 @@ export component AppWindow inherits SheetWindow {
                                                 text: @tr("Drop shadow");
                                                 VerticalLayout {
                                                     alignment: center;
-                                                    Switch { on: root.sh-on; label: @tr("Drop shadow"); toggled => { root.sh-on = !root.sh-on; root.sheet-changed(); } }
+                                                    Switch { on: t.sh-on; label: @tr("Drop shadow"); toggled => { t.sh-on = !t.sh-on; root.text-edited(ti); } }
                                                 }
                                             }
-                                            if root.sh-on: VerticalLayout {
+                                            if t.sh-on: VerticalLayout {
                                                 spacing: 6px;
                                                 Row {
                                                     text: @tr("Blend mode");
                                                     Dropdown {
                                                         label: @tr("Blend mode");
                                                         items: [@tr("Normal"), @tr("Darken"), @tr("Multiply"), @tr("Color Burn"), @tr("Linear Burn"), @tr("Lighten"), @tr("Screen"), @tr("Color Dodge"), @tr("Linear Dodge (Add)"), @tr("Overlay"), @tr("Soft Light"), @tr("Hard Light"), @tr("Difference"), @tr("Exclusion")];
-                                                        current: root.sh-blend;
-                                                        selected(i) => { root.sh-blend = i; root.sheet-changed(); }
+                                                        current: t.sh-blend;
+                                                        selected(i) => { t.sh-blend = i; root.text-edited(ti); }
                                                     }
                                                 }
                                                 ColorRow {
-                                                    text: @tr("Colour"); value <=> root.sh-color; shown: root.sh-swatch; invalid: root.invalid == "sh-color";
-                                                    palette: root.head-palette; slot: root.sh-slot;
-                                                    edited => { root.color-typed(3); root.sheet-changed(); }
-                                                    swatch(i) => { root.color-swatch(3, i); }
-                                                    panel => { root.color-panel(3); }
+                                                    text: @tr("Colour"); value <=> t.sh-color; shown: t.sh-swatch; invalid: (root.invalid == "sh-color" && ti == root.text-active);
+                                                    palette: root.head-palette; slot: t.sh-slot;
+                                                    edited => { root.text-color-typed(ti, 1); root.text-edited(ti); }
+                                                    swatch(i) => { root.text-color-swatch(ti, 1, i); }
+                                                    panel => { root.text-color-panel(ti, 1); }
                                                 }
                                                 Row {
                                                     text: @tr("Opacity");
-                                                    NumberField { text <=> root.sh-opacity; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Opacity"); invalid: root.invalid == "sh-opacity"; edited => { root.sheet-changed(); } }
+                                                    NumberField { text <=> t.sh-opacity; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Opacity"); invalid: (root.invalid == "sh-opacity" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                 }
                                                 Row {
                                                     text: @tr("Angle");
-                                                    if root.sh-global: NumberField { text <=> root.global-angle; scrub: 1; step: 1; minimum: -360; maximum: 360; unit: "°"; label: @tr("Angle"); invalid: root.invalid == "global-angle"; edited => { root.sheet-changed(); } }
-                                                    if !root.sh-global: NumberField { text <=> root.sh-angle; scrub: 1; step: 1; minimum: -360; maximum: 360; unit: "°"; label: @tr("Angle"); invalid: root.invalid == "sh-angle"; edited => { root.sheet-changed(); } }
+                                                    if t.sh-global: NumberField { text <=> root.global-angle; scrub: 1; step: 1; minimum: -360; maximum: 360; unit: "°"; label: @tr("Angle"); invalid: (root.invalid == "global-angle" && ti == root.text-active); edited => { root.text-edited(ti); } }
+                                                    if !t.sh-global: NumberField { text <=> t.sh-angle; scrub: 1; step: 1; minimum: -360; maximum: 360; unit: "°"; label: @tr("Angle"); invalid: (root.invalid == "sh-angle" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                 }
                                                 Row {
                                                     text: @tr("Use global light");
                                                     VerticalLayout {
                                                         alignment: center;
-                                                        Switch { on: root.sh-global; label: @tr("Use global light"); toggled => { root.sh-global = !root.sh-global; root.sheet-changed(); } }
+                                                        Switch { on: t.sh-global; label: @tr("Use global light"); toggled => { t.sh-global = !t.sh-global; root.text-edited(ti); } }
                                                     }
                                                 }
                                                 Row {
                                                     text: @tr("Distance");
-                                                    NumberField { text <=> root.sh-distance; scrub: 0.5; step: 1; minimum: 0; unit: "px"; label: @tr("Distance"); invalid: root.invalid == "sh-distance"; edited => { root.sheet-changed(); } }
+                                                    NumberField { text <=> t.sh-distance; scrub: 0.5; step: 1; minimum: 0; unit: "px"; label: @tr("Distance"); invalid: (root.invalid == "sh-distance" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                 }
                                                 Row {
                                                     text: @tr("Spread");
-                                                    NumberField { text <=> root.sh-spread; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Spread"); invalid: root.invalid == "sh-spread"; edited => { root.sheet-changed(); } }
+                                                    NumberField { text <=> t.sh-spread; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Spread"); invalid: (root.invalid == "sh-spread" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                 }
                                                 Row {
                                                     text: @tr("Size");
-                                                    NumberField { text <=> root.sh-size; scrub: 0.5; step: 1; minimum: 0; unit: "px"; label: @tr("Shadow size"); invalid: root.invalid == "sh-size"; edited => { root.sheet-changed(); } }
+                                                    NumberField { text <=> t.sh-size; scrub: 0.5; step: 1; minimum: 0; unit: "px"; label: @tr("Shadow size"); invalid: (root.invalid == "sh-size" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                 }
                                                 Row {
                                                     text: @tr("Contour");
                                                     Dropdown {
                                                         label: @tr("Contour");
                                                         items: [@tr("Linear"), @tr("Cone"), @tr("Cone – Inverted"), @tr("Gaussian"), @tr("Half Round"), @tr("Ring"), @tr("Ring – Double"), @tr("Rolling Slope – Descending"), @tr("Rounded Steps"), @tr("Sawtooth 1")];
-                                                        current: root.sh-contour;
-                                                        selected(i) => { root.sh-contour = i; root.sheet-changed(); }
+                                                        current: t.sh-contour;
+                                                        selected(i) => { t.sh-contour = i; root.text-edited(ti); }
                                                     }
                                                 }
                                                 Row {
                                                     text: @tr("Anti-aliased");
                                                     VerticalLayout {
                                                         alignment: center;
-                                                        Switch { on: root.sh-aa; label: @tr("Anti-aliased"); toggled => { root.sh-aa = !root.sh-aa; root.sheet-changed(); } }
+                                                        Switch { on: t.sh-aa; label: @tr("Anti-aliased"); toggled => { t.sh-aa = !t.sh-aa; root.text-edited(ti); } }
                                                     }
                                                 }
                                                 Row {
                                                     text: @tr("Noise");
-                                                    NumberField { text <=> root.sh-noise; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Noise"); invalid: root.invalid == "sh-noise"; edited => { root.sheet-changed(); } }
+                                                    NumberField { text <=> t.sh-noise; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Noise"); invalid: (root.invalid == "sh-noise" && ti == root.text-active); edited => { root.text-edited(ti); } }
                                                 }
                                                 Row {
                                                     text: @tr("Text knocks out drop shadow");
                                                     VerticalLayout {
                                                         alignment: center;
-                                                        Switch { on: root.sh-knock; label: @tr("Text knocks out drop shadow"); toggled => { root.sh-knock = !root.sh-knock; root.sheet-changed(); } }
+                                                        Switch { on: t.sh-knock; label: @tr("Text knocks out drop shadow"); toggled => { t.sh-knock = !t.sh-knock; root.text-edited(ti); } }
                                                     }
                                                 }
                                                 Para { text: @tr("As in Photoshop’s layer style: the angle is where the light comes from, the shadow falls the other way. With Use global light every text that has it on shares one angle. Spread hardens the edge, Size softens it, the contour shapes how it fades, noise roughens it."); }
@@ -2889,7 +2907,7 @@ export component AppWindow inherits SheetWindow {
                 width: desk.width;
                 height: desk.height;
                 for b[bi] in root.text-boxes: Rectangle {
-                    visible: bi != root.text-open && b.w > 0;
+                    visible: bi != root.text-active && b.w > 0;
                     x: page.x + page.width * b.x - 4px;
                     y: page.y + page.height * b.y - 4px;
                     width: page.width * b.w + 8px;
@@ -2897,10 +2915,10 @@ export component AppWindow inherits SheetWindow {
                     border-width: 1px;
                     border-radius: 3px;
                     border-color: other.has-hover ? Theme.accent.with-alpha(0.7) : Theme.accent.with-alpha(0.2);
-                    other := TouchArea { mouse-cursor: pointer; clicked => { root.text-open-at(bi); } }
+                    other := TouchArea { mouse-cursor: pointer; clicked => { root.text-pick(bi); } }
                 }
             }
-            if root.side-tab == 3 && root.headline != "" && root.head-bw > 0: Rectangle {
+            if root.side-tab == 3 && root.text-active < root.texts.length && root.head-bw > 0: Rectangle {
                 width: desk.width;
                 height: desk.height;
                 property <float> bx0;
@@ -2908,8 +2926,10 @@ export component AppWindow inherits SheetWindow {
                 property <float> dx0;
                 property <float> dy0;
                 property <float> page-h-px: root.page-px / root.page-aspect;
-                property <float> dx: root.head-dx.is-float() ? root.head-dx.to-float() : 0;
-                property <float> dy: root.head-dy.is-float() ? root.head-dy.to-float() : 0;
+                property <string> tx: root.texts[root.text-active].dx;
+                property <string> ty: root.texts[root.text-active].dy;
+                property <float> dx: self.tx.is-float() ? self.tx.to-float() : 0;
+                property <float> dy: self.ty.is-float() ? self.ty.to-float() : 0;
                 frame := Rectangle {
                     x: page.x + page.width * (hd.pressed ? parent.bx0 + (parent.dx - parent.dx0) / root.page-px : root.head-bx) - 4px;
                     y: page.y + page.height * (hd.pressed ? parent.by0 + (parent.dy - parent.dy0) / parent.page-h-px : root.head-by) - 4px;
@@ -2953,9 +2973,7 @@ export component AppWindow inherits SheetWindow {
                             let ly = root.trim-y + root.trim-h * ky / 100;
                             let snap-x = root.head-grid && kx > 0 && kx < 100 && Math.abs(lx - cx) * page.width < 6px;
                             let snap-y = root.head-grid && ky > 0 && ky < 100 && Math.abs(ly - cy) * page.height < 6px;
-                            root.head-dx = Math.round(parent.dx0 + ddx + (snap-x ? (lx - cx) * root.page-px : 0));
-                            root.head-dy = Math.round(parent.dy0 + ddy + (snap-y ? (ly - cy) * parent.page-h-px : 0));
-                            root.sheet-changed();
+                            root.text-move(Math.round(parent.dx0 + ddx + (snap-x ? (lx - cx) * root.page-px : 0)), Math.round(parent.dy0 + ddy + (snap-y ? (ly - cy) * parent.page-h-px : 0)));
                         }
                     }
                 }
