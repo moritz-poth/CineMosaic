@@ -590,6 +590,15 @@ msgstr "Fundir imagen principal"
 msgid "Every tile gets the still whose colours fit it best; a still comes back only that many tiles away. More stills per shot give more colours to choose from (Grab missing stills fetches them). Colour match tints each tile towards its place in the main picture, Blend in lays the main picture over everything – a little of both makes the picture clear."
 msgstr "Cada tesela recibe el fotograma cuyos colores encajan mejor; un fotograma solo vuelve a tantas teselas de distancia. Más fotogramas por plano dan más colores para elegir («Capturar fotogramas que faltan» los captura). El ajuste de color tiñe cada tesela hacia su sitio en la imagen principal, Fundir pone la imagen principal sobre todo: un poco de ambos hace la imagen clara."
 
+msgid "{} stills still to grab"
+msgstr "Faltan {} fotogramas por capturar"
+
+msgid "Stills not grabbed yet"
+msgstr "Fotogramas aún sin capturar"
+
+msgid "Grab"
+msgstr "Capturar"
+
 msgid "Background"
 msgstr "Fondo"
 

@@ -2988,6 +2988,35 @@ export component AppWindow inherits SheetWindow {
                     ZoomButton { text: @tr("Fit"); label: @tr("Fit the whole sheet"); enabled: Math.abs(root.zoom - 1) > 0.01; clicked => { desk.zoom-to(1, desk.width / 2, desk.height / 2); } }
                 }
             }
+            // stills still to grab: a small, quiet card at the top centre of the preview (user 2026-11-23)
+            if (root.state == 2 && root.missing > 0) || (root.state == 0 && root.can-grab): Rectangle {
+                x: (desk.width - self.width) / 2;
+                y: 14px;
+                width: pill.preferred-width;
+                height: 32px;
+                border-radius: 10px;
+                background: Theme.background.with-alpha(0.94);
+                border-width: 1px;
+                border-color: Theme.line;
+                drop-shadow-blur: 10px;
+                drop-shadow-offset-y: 2px;
+                drop-shadow-color: #00000030;
+                pill := HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 4px;
+                    spacing: 10px;
+                    Text {
+                        text: root.state == 2 ? @tr("{} stills still to grab", root.missing) : @tr("Stills not grabbed yet");
+                        font-size: 11px;
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        CheckButton { small: true; text: @tr("Grab"); primary: true; enabled: root.can-grab; clicked => { root.grab(); } }
+                    }
+                }
+            }
             if root.state == 0 && root.source-info == "": Text {
                 text: root.mode == 0 ? @tr("Choose a master file and its cut list – or drag them here.") : @tr("Choose a bin with your sequence.");
                 font-size: 13px;
