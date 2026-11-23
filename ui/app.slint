@@ -626,6 +626,55 @@ component UpdateOffer inherits VerticalLayout {
     }
 }
 
+// New version in the main window: a card floating at the bottom centre over everything, rounded corners and a
+// soft shadow, like Fona (user 2026-11-23: every app does it this way, never somewhere inside the UI)
+component UpdateCard inherits Rectangle {
+    width: min(row.preferred-width + 28px, 640px);
+    height: col.preferred-height + 24px;
+    border-radius: 12px;
+    background: Theme.background;
+    border-width: 1px;
+    border-color: Theme.line;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: #00000040;
+    accessible-role: groupbox;
+    accessible-label: @tr("Version {} is available.", Shared.update-version);
+    col := VerticalLayout {
+        x: 14px;
+        y: 12px;
+        width: parent.width - 28px;
+        spacing: 6px;
+        row := HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                // arrow in a circle: download
+                Path {
+                    width: 18px;
+                    height: 18px;
+                    viewbox-width: 18;
+                    viewbox-height: 18;
+                    commands: "M 9 1 A 8 8 0 1 1 8.99 1 Z M 9 5 L 9 12.5 M 5.5 9.5 L 9 13 L 12.5 9.5";
+                    stroke: Theme.text;
+                    stroke-width: 1.5px;
+                    fill: transparent;
+                }
+            }
+            Text {
+                text: @tr("Version {} is available.", Shared.update-version);
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            CheckButton { small: true; text: @tr("What's new"); clicked => { Shared.show-release(); } }
+            CheckButton { small: true; text: @tr("Install update"); primary: true; enabled: Shared.update-state != 3; clicked => { Shared.install-update(); } }
+        }
+        if Shared.update-state == 3 || Shared.update-state == 4: UpdateStatus { width: parent.width; font-size: 11px; }
+    }
+}
+
 // Base of every window: app font, colours from Shared.dark, Help menu (on the Mac the menu belongs to the active window)
 component SheetWindow inherits Window {
     default-font-family: "JetBrains Mono";
@@ -2069,10 +2118,6 @@ export component AppWindow inherits SheetWindow {
                 padding-top: 22px;
                 spacing: 6px;
                 Headline { }
-                if Shared.update-version != "": VerticalLayout {
-                    padding-bottom: 10px;
-                    UpdateOffer { text-width: Metrics.text-width; }
-                }
                 TabStrip {
                     items: [@tr("Source"), @tr("Sheet"), @tr("Frame line"), @tr("Text")];
                     current <=> root.side-tab;
@@ -2951,6 +2996,10 @@ export component AppWindow inherits SheetWindow {
                 y: page.y + (page.height - self.height) / 2;
             }
         }
+    }
+    if Shared.update-version != "": UpdateCard {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 18px;
     }
     // files dragged over the window: one big landing area with a file icon in the middle, as in other Mac apps
     if root.drop-hover: Rectangle {
