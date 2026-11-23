@@ -615,8 +615,9 @@ impl Mask {
 }
 
 /// The lines of a text as coverage, with `room` px free around them (for the shadow to spread into); fake bold
-/// widens the strokes, fake italic slants.
-fn text_mask(hl: &Headline, t: &Placed, room: f64) -> Mask {
+/// widens the strokes, fake italic slants. Clipped to the page of `page` px plus `room`, so a huge or far-off text
+/// (an odd project file) never needs more than about a page of memory.
+fn text_mask(hl: &Headline, t: &Placed, room: f64, page: (u32, u32)) -> Mask {
     let font = &*hl.face.font;
     let scale = t.scale;
     let sf = font.as_scaled(scale);
@@ -624,8 +625,10 @@ fn text_mask(hl: &Headline, t: &Placed, room: f64) -> Mask {
     let slant = if hl.face.fake_italic { 0.2 } else { 0.0 };
     // glyphs can reach a little beyond the box (accents, italics, overhangs)
     let pad = room + scale.y as f64 * 0.5 + bold_steps as f64;
-    let (x0, y0) = ((t.rect.x - pad).floor() as i64, (t.rect.y - pad).floor() as i64);
-    let (w, h) = ((t.rect.w + 2.0 * pad).ceil() as usize + 1, (t.rect.h + 2.0 * pad).ceil() as usize + 1);
+    let clip = |lo: f64, hi: f64, size: u32| (lo.max(-room).floor() as i64, hi.min(size as f64 + room).ceil() as i64);
+    let (x0, x1) = clip(t.rect.x - pad, t.rect.x + t.rect.w + pad, page.0);
+    let (y0, y1) = clip(t.rect.y - pad, t.rect.y + t.rect.h + pad, page.1);
+    let (w, h) = ((x1 - x0).max(0) as usize + 1, (y1 - y0).max(0) as usize + 1);
     let mut m = Mask { x0, y0, w, h, a: vec![0.0; w * h] };
     for (line, &(x, baseline)) in hl.text.split('\n').map(|l| l.trim_end_matches('\r')).zip(&t.lines) {
         let mut caret = x as f32;
@@ -685,7 +688,8 @@ fn box_blur(a: &mut [f32], w: usize, h: usize, r: usize, horizontal: bool) {
     }
 }
 
-/// Square dilation of radius `r` (Photoshop's Spread hardens the shadow by growing it before the blur).
+/// Square dilation of radius `r` (Photoshop's Spread hardens the shadow by growing it before the blur): a sliding
+/// maximum with a deque, so its cost does not grow with the radius.
 fn dilate(a: &mut [f32], w: usize, h: usize, r: usize) {
     if r == 0 {
         return;
@@ -694,9 +698,24 @@ fn dilate(a: &mut [f32], w: usize, h: usize, r: usize) {
         let (n, lines) = if horizontal { (w, h) } else { (h, w) };
         let idx = |line: usize, k: usize| if horizontal { line * w + k } else { k * w + line };
         let mut buf = vec![0.0f32; n];
+        let mut q: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
         for line in 0..lines {
-            for k in 0..n {
-                buf[k] = (k.saturating_sub(r)..=(k + r).min(n - 1)).map(|j| a[idx(line, j)]).fold(0.0, f32::max);
+            q.clear();
+            // window of output k is k - r ..= k + r; j runs r ahead of k
+            for j in 0..n + r {
+                if j < n {
+                    while q.back().is_some_and(|&b| a[idx(line, b)] <= a[idx(line, j)]) {
+                        q.pop_back();
+                    }
+                    q.push_back(j);
+                }
+                if j >= r {
+                    let k = j - r;
+                    while q.front().is_some_and(|&f| f + r < k) {
+                        q.pop_front();
+                    }
+                    buf[k] = q.front().map_or(0.0, |&f| a[idx(line, f)]);
+                }
             }
             for k in 0..n {
                 a[idx(line, k)] = buf[k];
@@ -758,8 +777,9 @@ fn draw_shadow(page: &mut RgbImage, sheet: &Sheet, text: &Mask, sh: &Shadow) {
 
 /// A text (and its shadow, under it) on the page.
 fn draw_text(page: &mut RgbImage, sheet: &Sheet, hl: &Headline, t: &Placed) {
-    let room = hl.shadow.as_ref().map_or(0.0, |s| sheet.px(s.size_mm) + 2.0);
-    let m = text_mask(hl, t, room);
+    // room for the shadow to spread, and to reach in from beyond the page edge by its distance
+    let room = hl.shadow.as_ref().map_or(0.0, |s| sheet.px(s.size_mm) + sheet.px(s.distance_mm) + 2.0);
+    let m = text_mask(hl, t, room, page.dimensions());
     if let Some(sh) = &hl.shadow {
         draw_shadow(page, sheet, &m, sh);
     }
@@ -1039,6 +1059,17 @@ mod tests {
             assert_eq!(page.get_pixel((t.rect.x - 5.0) as u32, y), &Rgb([255, 255, 255]), "gap at text {}", t.i);
         }
         assert_eq!(page.get_pixel(1050, y), &Rgb([0, 0, 0]), "line between the texts");
+    }
+
+    #[test]
+    fn dilation_is_a_sliding_maximum() {
+        let mut a = vec![0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.0];
+        dilate(&mut a, 8, 1, 1);
+        assert_eq!(a, vec![0.0, 0.5, 0.5, 0.5, 0.0, 1.0, 1.0, 1.0]);
+        let mut b = vec![0.0; 9];
+        b[4] = 1.0;
+        dilate(&mut b, 3, 3, 5);
+        assert!(b.iter().all(|&v| v == 1.0), "a radius beyond the size fills all");
     }
 
     #[test]
