@@ -1517,9 +1517,9 @@ fn grab(app: &AppWindow) {
     });
 }
 
-/// The highest frame number of a timecode in the first master (24 without one).
-fn last_frame(app: &AppWindow) -> u32 {
-    with_state(app, |st| st.borrow().masters.first().map_or(25, |m| m.1.rate.nominal()) as u32 - 1)
+/// The highest frame number of a timecode in master `i` (24 without one).
+fn last_frame(app: &AppWindow, i: i32) -> u32 {
+    with_state(app, |st| st.borrow().masters.get(i as usize).map_or(25, |m| m.1.rate.nominal()) as u32 - 1)
 }
 
 /// Finds the cuts of every master that has neither a cut list nor detected cuts (in a thread; pause and cancel work).
@@ -2483,15 +2483,15 @@ fn wire_source(app: &AppWindow) {
     });
     app.on_tc_edit({
         let weak = app.as_weak();
-        move |st, key, meta| match weak.upgrade() {
-            Some(app) => tc_edit(st, &key, meta, last_frame(&app)),
+        move |i, st, key, meta| match weak.upgrade() {
+            Some(app) => tc_edit(st, &key, meta, last_frame(&app, i)),
             None => st,
         }
     });
     app.on_tc_paste({
         let weak = app.as_weak();
-        move |st| match (weak.upgrade(), clipboard_text()) {
-            (Some(app), Some(clip)) => tc_pasted(st, &clip, last_frame(&app)),
+        move |i, st| match (weak.upgrade(), clipboard_text()) {
+            (Some(app), Some(clip)) => tc_pasted(st, &clip, last_frame(&app, i)),
             _ => st,
         }
     });

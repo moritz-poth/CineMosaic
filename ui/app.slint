@@ -1811,8 +1811,9 @@ export component AppWindow inherits SheetWindow {
     callback remove-list(int);
     // a master without cut list: its cuts can be found in the picture
     in property <bool> can-detect;
-    pure callback tc-edit(TcState, string, bool) -> TcState;
-    callback tc-paste(TcState) -> TcState;
+    // timecode typing in the fields of master i (its own frame rate)
+    pure callback tc-edit(int, TcState, string, bool) -> TcState;
+    callback tc-paste(int, TcState) -> TcState;
     pure callback tc-parts(string) -> [string];
     // master i: the film between these master timecodes (empty: from the start / to the end), titles stay out
     callback film-changed(int, string, string);
@@ -2032,14 +2033,14 @@ export component AppWindow inherits SheetWindow {
                                             Text { text: @tr("Start"); font-size: 11px; color: Theme.muted; vertical-alignment: center; }
                                             from := TcField {
                                                 text: m.from; label: @tr("Start") + " " + m.name; enabled: root.state != 1;
-                                                edit(s, k, mt) => { root.tc-edit(s, k, mt) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
+                                                edit(s, k, mt) => { root.tc-edit(i, s, k, mt) } paste(s) => { root.tc-paste(i, s) } parts(t) => { root.tc-parts(t) }
                                                 done => { root.film-changed(i, from.text, to.text); }
                                             }
                                             Rectangle { horizontal-stretch: 1; }
                                             Text { text: @tr("End"); font-size: 11px; color: Theme.muted; vertical-alignment: center; }
                                             to := TcField {
                                                 text: m.to; label: @tr("End") + " " + m.name; enabled: root.state != 1;
-                                                edit(s, k, mt) => { root.tc-edit(s, k, mt) } paste(s) => { root.tc-paste(s) } parts(t) => { root.tc-parts(t) }
+                                                edit(s, k, mt) => { root.tc-edit(i, s, k, mt) } paste(s) => { root.tc-paste(i, s) } parts(t) => { root.tc-parts(t) }
                                                 done => { root.film-changed(i, from.text, to.text); }
                                             }
                                         }
