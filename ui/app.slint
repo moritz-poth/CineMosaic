@@ -18,6 +18,14 @@ export struct MasterRow {
     to: string,
 }
 
+// where a text lies on the page, as fractions of the page (w 0 = nothing drawn)
+export struct TextBox {
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+}
+
 export struct Swatch {
     hex: string,
     c: color,
@@ -312,6 +320,7 @@ component NumberField inherits Rectangle {
     in property <float> scrub: 0;
     in property <float> step: 1;
     in property <float> minimum: 0;
+    in property <float> maximum: 1000000000;
     callback edited();
     width: 96px;
     height: 26px;
@@ -360,7 +369,7 @@ component NumberField inherits Rectangle {
                 if Math.abs(d) > 2 { self.dragged = true; }
                 if self.dragged {
                     let v = Math.round((self.v0 + d * root.scrub) / root.step) * root.step;
-                    root.text = Math.round(max(root.minimum, v) * 100) / 100;
+                    root.text = Math.round(min(root.maximum, max(root.minimum, v)) * 100) / 100;
                     root.edited();
                 }
             }
@@ -1679,6 +1688,48 @@ component StyleToggle inherits Rectangle {
 // Colour: five presets and a hex field. A click on a preset takes its colour; a click into the hex field opens the
 // colour panel, whose colour then becomes the chosen preset; typing a hex value changes it too (Rust). The square at the right shows
 // the colour Rust read.
+// a text in the list of the Text tab: click opens it (only one is open), × removes it
+component TextHeader inherits Rectangle {
+    in property <string> title;
+    in property <bool> open;
+    callback clicked();
+    callback removed();
+    height: 30px;
+    border-radius: 6px;
+    background: root.open ? Theme.text.with-alpha(0.07) : t.has-hover ? Theme.text.with-alpha(0.04) : transparent;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-expanded: root.open;
+    accessible-action-default => { root.clicked(); }
+    t := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 4px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 8px;
+                height: 8px;
+                commands: root.open ? "M 0 2 L 4 6 L 8 2" : "M 2 0 L 6 4 L 2 8";
+                stroke: Theme.text;
+                stroke-width: 1.5px;
+            }
+        }
+        Text { text: root.title; font-size: 12px; font-weight: root.open ? 600 : 400; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Rectangle {
+            width: 22px;
+            accessible-role: button;
+            accessible-label: @tr("Remove {}", root.title);
+            accessible-action-default => { root.removed(); }
+            background: x.pressed ? Theme.text.with-alpha(0.14) : x.has-hover ? Theme.text.with-alpha(0.07) : transparent;
+            border-radius: 4px;
+            Text { text: "×"; font-size: 14px; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
+            x := TouchArea { mouse-cursor: pointer; clicked => { root.removed(); } }
+        }
+    }
+}
+
 component ColorRow inherits HorizontalLayout {
     in property <string> text;
     in-out property <string> value;
@@ -1917,6 +1968,33 @@ export component AppWindow inherits SheetWindow {
     in property <color> bg-swatch: white;
     in property <[Swatch]> bg-palette;
     in-out property <int> bg-slot;
+    // text elements (Text tab): one header per text, the open one is edited in the head-* fields
+    in property <[string]> text-titles;
+    in-out property <int> text-open;
+    in property <[TextBox]> text-boxes;
+    callback text-open-at(int);
+    callback text-add();
+    callback text-remove(int);
+    // lines of the open text: 0 left, 1 centred, 2 right
+    in-out property <int> head-lines: 1;
+    // drop shadow of the open text, as Photoshop's layer style (defaults as there: Multiply, black, 75 %, 120°)
+    in-out property <bool> sh-on;
+    in-out property <int> sh-blend: 2;
+    in-out property <string> sh-color: "#000000";
+    in property <color> sh-swatch: black;
+    in-out property <int> sh-slot;
+    in-out property <string> sh-opacity: "75";
+    in-out property <string> sh-angle: "120";
+    in-out property <bool> sh-global: true;
+    // Use Global Light: one angle for every text that has it on (kept with the sheet)
+    in-out property <string> global-angle: "120";
+    in-out property <string> sh-distance: "12";
+    in-out property <string> sh-spread: "0";
+    in-out property <string> sh-size: "18";
+    in-out property <int> sh-contour;
+    in-out property <bool> sh-aa;
+    in-out property <string> sh-noise: "0";
+    in-out property <bool> sh-knock: true;
     callback color-swatch(int, int);
     callback color-panel(int);
     callback color-typed(int);
@@ -1986,7 +2064,7 @@ export component AppWindow inherits SheetWindow {
                     UpdateOffer { text-width: Metrics.text-width; }
                 }
                 TabStrip {
-                    items: [@tr("Source"), @tr("Sheet"), @tr("Frame line"), @tr("Headline")];
+                    items: [@tr("Source"), @tr("Sheet"), @tr("Frame line"), @tr("Text")];
                     current <=> root.side-tab;
                 }
                 Rectangle { height: 6px; }
@@ -2280,100 +2358,210 @@ export component AppWindow inherits SheetWindow {
                                 spacing: 6px;
                                 alignment: start;
                                 vertical-stretch: 1;
-                                FieldFrame {
-                                    height: 26px;
-                                    border-color: head-input.has-focus ? Theme.accent : Theme.line;
-                                    if root.headline == "": Text {
-                                        x: 8px;
-                                        height: parent.height;
-                                        text: @tr("Headline (empty = none)");
-                                        font-size: 12px;
-                                        color: Theme.faint;
-                                        vertical-alignment: center;
-                                    }
-                                    head-input := TextInput {
-                                        x: 8px;
-                                        width: parent.width - 16px;
-                                        height: parent.height;
-                                        text <=> root.headline;
-                                        font-size: 12px;
-                                        color: Theme.text;
-                                        vertical-alignment: center;
-                                        single-line: true;
-                                        accessible-label: @tr("Headline");
-                                        edited => { root.sheet-changed(); }
-                                    }
-                                }
-                                VerticalLayout {
+                                // the texts: one header each, only the open one shows its fields (user 2026-11-23)
+                                for title[ti] in root.text-titles: VerticalLayout {
                                     spacing: 6px;
-                                    Row {
-                                        text: @tr("Font");
-                                        FontDropdown {
-                                            width: 240px;
-                                            label: @tr("Font");
-                                            fonts: root.fonts;
-                                            current <=> root.font;
-                                            chosen => { root.sheet-changed(); }
-                                            jump(t) => { return root.jump-font(t); }
+                                    TextHeader {
+                                        title: title != "" ? title : @tr("Text {}", ti + 1);
+                                        open: ti == root.text-open;
+                                        clicked => { root.text-open-at(ti); }
+                                        removed => { root.text-remove(ti); }
+                                    }
+                                    if ti == root.text-open: VerticalLayout {
+                                        spacing: 6px;
+                                        FieldFrame {
+                                            height: max(26px, head-input.preferred-height + 12px);
+                                            border-color: head-input.has-focus ? Theme.accent : Theme.line;
+                                            if root.headline == "": Text {
+                                                x: 8px;
+                                                y: 6px;
+                                                text: @tr("Text – Return starts a new line");
+                                                font-size: 12px;
+                                                color: Theme.faint;
+                                            }
+                                            head-input := TextInput {
+                                                x: 8px;
+                                                y: 6px;
+                                                width: parent.width - 16px;
+                                                height: parent.height - 12px;
+                                                text <=> root.headline;
+                                                font-size: 12px;
+                                                color: Theme.text;
+                                                single-line: false;
+                                                accessible-label: @tr("Text");
+                                                edited => { root.sheet-changed(); }
+                                            }
                                         }
-                                    }
-                                    Row {
-                                        text: @tr("Size");
-                                        StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
-                                        StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
-                                        NumberField { text <=> root.head-size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
-                                    }
-                                    ColorRow {
-                                        text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color";
-                                        palette: root.head-palette; slot: root.head-slot;
-                                        edited => { root.color-typed(1); root.sheet-changed(); }
-                                        swatch(i) => { root.color-swatch(1, i); }
-                            panel => { root.color-panel(1); }
-                                    }
-                                    HorizontalLayout {
-                                        spacing: 10px;
-                                        VerticalLayout {
-                                            spacing: 4px;
-                                            Text { text: @tr("Anchor"); font-size: 12px; color: Theme.text; }
-                                            AnchorPicker { current: root.head-anchor; chosen(i) => { root.anchor-chosen(i); } }
-                                        }
-                                        Rectangle { horizontal-stretch: 1; }
                                         VerticalLayout {
                                             spacing: 6px;
-                                            alignment: end;
-                                            HorizontalLayout {
-                                                spacing: 6px;
-                                                Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                                NumberField { text <=> root.head-dx; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                            Row {
+                                                text: @tr("Font");
+                                                FontDropdown {
+                                                    width: 240px;
+                                                    label: @tr("Font");
+                                                    fonts: root.fonts;
+                                                    current <=> root.font;
+                                                    chosen => { root.sheet-changed(); }
+                                                    jump(t) => { return root.jump-font(t); }
+                                                }
+                                            }
+                                            Row {
+                                                text: @tr("Size");
+                                                StyleToggle { text: "B"; bold: true; label: @tr("Bold"); on: root.head-bold; toggled => { root.head-bold = !root.head-bold; root.sheet-changed(); } }
+                                                StyleToggle { text: "I"; italic: true; label: @tr("Italic"); on: root.head-italic; toggled => { root.head-italic = !root.head-italic; root.sheet-changed(); } }
+                                                NumberField { text <=> root.head-size; scrub: 0.5; step: 1; minimum: 2; unit: "pt"; label: @tr("Size"); invalid: root.invalid == "head-size"; edited => { root.sheet-changed(); } }
+                                            }
+                                            Row {
+                                                text: @tr("Lines");
+                                                Dropdown {
+                                                    label: @tr("Lines");
+                                                    items: [@tr("Left"), @tr("Centred"), @tr("Right")];
+                                                    current: root.head-lines;
+                                                    selected(i) => { root.head-lines = i; root.sheet-changed(); }
+                                                }
+                                            }
+                                            ColorRow {
+                                                text: @tr("Colour"); value <=> root.head-color; shown: root.head-swatch; invalid: root.invalid == "head-color";
+                                                palette: root.head-palette; slot: root.head-slot;
+                                                edited => { root.color-typed(1); root.sheet-changed(); }
+                                                swatch(i) => { root.color-swatch(1, i); }
+                                    panel => { root.color-panel(1); }
                                             }
                                             HorizontalLayout {
+                                                spacing: 10px;
+                                                VerticalLayout {
+                                                    spacing: 4px;
+                                                    Text { text: @tr("Anchor"); font-size: 12px; color: Theme.text; }
+                                                    AnchorPicker { current: root.head-anchor; chosen(i) => { root.anchor-chosen(i); } }
+                                                }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                VerticalLayout {
+                                                    spacing: 6px;
+                                                    alignment: end;
+                                                    HorizontalLayout {
+                                                        spacing: 6px;
+                                                        Text { text: "X"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                                                        NumberField { text <=> root.head-dx; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move right"); invalid: root.invalid == "head-dx"; edited => { root.sheet-changed(); } }
+                                                    }
+                                                    HorizontalLayout {
+                                                        spacing: 6px;
+                                                        Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                                                        NumberField { text <=> root.head-dy; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                                    }
+                                                }
+                                            }
+                                            Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
+                                            Para { text: @tr("The anchor is the point of the sheet the text hangs at; X and Y move it from there. You can also drag it in the preview; a click on another text there opens that one. Where a text covers the frame line, the line breaks."); }
+                                            Rectangle { height: 8px; }
+                                            Row {
+                                                text: @tr("Space above · below");
+                                                NumberField { width: 78px; text <=> root.head-pad-t; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space above"); invalid: root.invalid == "head-pad-t"; edited => { root.sheet-changed(); } }
+                                                NumberField { width: 78px; text <=> root.head-pad-b; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space below"); invalid: root.invalid == "head-pad-b"; edited => { root.sheet-changed(); } }
+                                            }
+                                            Row {
+                                                text: @tr("Space left · right");
+                                                NumberField { width: 78px; text <=> root.head-pad-l; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space left"); invalid: root.invalid == "head-pad-l"; edited => { root.sheet-changed(); } }
+                                                NumberField { width: 78px; text <=> root.head-pad-r; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space right"); invalid: root.invalid == "head-pad-r"; edited => { root.sheet-changed(); } }
+                                            }
+                                            Row {
+                                                text: @tr("Stills around the text");
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Switch { on: root.head-wrap; label: @tr("Stills around the text"); toggled => { root.head-wrap = !root.head-wrap; root.sheet-changed(); } }
+                                                }
+                                            }
+                                            Para { text: @tr("The space is what the stills keep from the text. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the text, leave its place free and go on in the next cells."); }
+                                            Rectangle { height: 8px; }
+                                            Row {
+                                                text: @tr("Drop shadow");
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Switch { on: root.sh-on; label: @tr("Drop shadow"); toggled => { root.sh-on = !root.sh-on; root.sheet-changed(); } }
+                                                }
+                                            }
+                                            if root.sh-on: VerticalLayout {
                                                 spacing: 6px;
-                                                Text { text: "Y"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
-                                                NumberField { text <=> root.head-dy; scrub: 2; step: 1; minimum: -99999; unit: "px"; label: @tr("Move down"); invalid: root.invalid == "head-dy"; edited => { root.sheet-changed(); } }
+                                                Row {
+                                                    text: @tr("Blend mode");
+                                                    Dropdown {
+                                                        label: @tr("Blend mode");
+                                                        items: [@tr("Normal"), @tr("Darken"), @tr("Multiply"), @tr("Color Burn"), @tr("Linear Burn"), @tr("Lighten"), @tr("Screen"), @tr("Color Dodge"), @tr("Linear Dodge (Add)"), @tr("Overlay"), @tr("Soft Light"), @tr("Hard Light"), @tr("Difference"), @tr("Exclusion")];
+                                                        current: root.sh-blend;
+                                                        selected(i) => { root.sh-blend = i; root.sheet-changed(); }
+                                                    }
+                                                }
+                                                ColorRow {
+                                                    text: @tr("Colour"); value <=> root.sh-color; shown: root.sh-swatch; invalid: root.invalid == "sh-color";
+                                                    palette: root.head-palette; slot: root.sh-slot;
+                                                    edited => { root.color-typed(3); root.sheet-changed(); }
+                                                    swatch(i) => { root.color-swatch(3, i); }
+                                                    panel => { root.color-panel(3); }
+                                                }
+                                                Row {
+                                                    text: @tr("Opacity");
+                                                    NumberField { text <=> root.sh-opacity; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Opacity"); invalid: root.invalid == "sh-opacity"; edited => { root.sheet-changed(); } }
+                                                }
+                                                Row {
+                                                    text: @tr("Angle");
+                                                    if root.sh-global: NumberField { text <=> root.global-angle; scrub: 1; step: 1; minimum: -360; maximum: 360; unit: "°"; label: @tr("Angle"); invalid: root.invalid == "global-angle"; edited => { root.sheet-changed(); } }
+                                                    if !root.sh-global: NumberField { text <=> root.sh-angle; scrub: 1; step: 1; minimum: -360; maximum: 360; unit: "°"; label: @tr("Angle"); invalid: root.invalid == "sh-angle"; edited => { root.sheet-changed(); } }
+                                                }
+                                                Row {
+                                                    text: @tr("Use global light");
+                                                    VerticalLayout {
+                                                        alignment: center;
+                                                        Switch { on: root.sh-global; label: @tr("Use global light"); toggled => { root.sh-global = !root.sh-global; root.sheet-changed(); } }
+                                                    }
+                                                }
+                                                Row {
+                                                    text: @tr("Distance");
+                                                    NumberField { text <=> root.sh-distance; scrub: 0.5; step: 1; minimum: 0; unit: "px"; label: @tr("Distance"); invalid: root.invalid == "sh-distance"; edited => { root.sheet-changed(); } }
+                                                }
+                                                Row {
+                                                    text: @tr("Spread");
+                                                    NumberField { text <=> root.sh-spread; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Spread"); invalid: root.invalid == "sh-spread"; edited => { root.sheet-changed(); } }
+                                                }
+                                                Row {
+                                                    text: @tr("Size");
+                                                    NumberField { text <=> root.sh-size; scrub: 0.5; step: 1; minimum: 0; unit: "px"; label: @tr("Shadow size"); invalid: root.invalid == "sh-size"; edited => { root.sheet-changed(); } }
+                                                }
+                                                Row {
+                                                    text: @tr("Contour");
+                                                    Dropdown {
+                                                        label: @tr("Contour");
+                                                        items: [@tr("Linear"), @tr("Cone"), @tr("Cone – Inverted"), @tr("Gaussian"), @tr("Half Round"), @tr("Ring"), @tr("Ring – Double"), @tr("Rolling Slope – Descending"), @tr("Rounded Steps"), @tr("Sawtooth 1")];
+                                                        current: root.sh-contour;
+                                                        selected(i) => { root.sh-contour = i; root.sheet-changed(); }
+                                                    }
+                                                }
+                                                Row {
+                                                    text: @tr("Anti-aliased");
+                                                    VerticalLayout {
+                                                        alignment: center;
+                                                        Switch { on: root.sh-aa; label: @tr("Anti-aliased"); toggled => { root.sh-aa = !root.sh-aa; root.sheet-changed(); } }
+                                                    }
+                                                }
+                                                Row {
+                                                    text: @tr("Noise");
+                                                    NumberField { text <=> root.sh-noise; scrub: 0.5; step: 1; minimum: 0; maximum: 100; unit: "%"; label: @tr("Noise"); invalid: root.invalid == "sh-noise"; edited => { root.sheet-changed(); } }
+                                                }
+                                                Row {
+                                                    text: @tr("Text knocks out drop shadow");
+                                                    VerticalLayout {
+                                                        alignment: center;
+                                                        Switch { on: root.sh-knock; label: @tr("Text knocks out drop shadow"); toggled => { root.sh-knock = !root.sh-knock; root.sheet-changed(); } }
+                                                    }
+                                                }
+                                                Para { text: @tr("As in Photoshop’s layer style: the angle is where the light comes from, the shadow falls the other way. With Use global light every text that has it on shares one angle. Spread hardens the edge, Size softens it, the contour shapes how it fades, noise roughens it."); }
                                             }
                                         }
                                     }
-                                    Para { text: @tr("Drag left or right in a field to change the value; click to type it."); }
-                                    Para { text: @tr("The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."); }
-                                    Rectangle { height: 8px; }
-                                    Row {
-                                        text: @tr("Space above · below");
-                                        NumberField { width: 78px; text <=> root.head-pad-t; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space above"); invalid: root.invalid == "head-pad-t"; edited => { root.sheet-changed(); } }
-                                        NumberField { width: 78px; text <=> root.head-pad-b; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space below"); invalid: root.invalid == "head-pad-b"; edited => { root.sheet-changed(); } }
-                                    }
-                                    Row {
-                                        text: @tr("Space left · right");
-                                        NumberField { width: 78px; text <=> root.head-pad-l; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space left"); invalid: root.invalid == "head-pad-l"; edited => { root.sheet-changed(); } }
-                                        NumberField { width: 78px; text <=> root.head-pad-r; scrub: 0.5; step: 1; unit: "px"; label: @tr("Space right"); invalid: root.invalid == "head-pad-r"; edited => { root.sheet-changed(); } }
-                                    }
-                                    Row {
-                                        text: @tr("Stills around the headline");
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Switch { on: root.head-wrap; label: @tr("Stills around the headline"); toggled => { root.head-wrap = !root.head-wrap; root.sheet-changed(); } }
-                                        }
-                                    }
-                                    Para { text: @tr("The space is what the stills keep from the headline. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the headline, leave its place free and go on in the next cells."); }
+                                }
+                                HorizontalLayout {
+                                    padding-top: 4px;
+                                    alignment: start;
+                                    CheckButton { text: @tr("Add text"); small: true; clicked => { root.text-add(); } }
+                                }
                                     Rectangle { height: 8px; }
                                     Row {
                                         text: @tr("Grid");
@@ -2386,8 +2574,7 @@ export component AppWindow inherits SheetWindow {
                                         text: @tr("Grid every");
                                         NumberField { text <=> root.head-grid-step; scrub: 0.05; step: 1; minimum: 1; unit: "%"; label: @tr("Grid every"); }
                                     }
-                                    if root.head-grid: Para { text: @tr("The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."); }
-                                }
+                                    if root.head-grid: Para { text: @tr("The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the frame of the open text turn green when its middle lies on a grid line."); }
                             }
                         }
                     }
@@ -2597,6 +2784,22 @@ export component AppWindow inherits SheetWindow {
             // (the preview follows from Rust a moment later); the area that takes the mouse stays put while dragging,
             // so the way of the mouse is measured from a fixed place. With the grid on, the middle snaps to a grid
             // line it comes within 6 screen pixels of, so it can lie exactly on it.
+            // the other texts: a faint frame, a click opens that text (then it can be dragged)
+            if root.side-tab == 3: Rectangle {
+                width: desk.width;
+                height: desk.height;
+                for b[bi] in root.text-boxes: Rectangle {
+                    visible: bi != root.text-open && b.w > 0;
+                    x: page.x + page.width * b.x - 4px;
+                    y: page.y + page.height * b.y - 4px;
+                    width: page.width * b.w + 8px;
+                    height: page.height * b.h + 8px;
+                    border-width: 1px;
+                    border-radius: 3px;
+                    border-color: other.has-hover ? Theme.accent.with-alpha(0.7) : Theme.accent.with-alpha(0.2);
+                    other := TouchArea { mouse-cursor: pointer; clicked => { root.text-open-at(bi); } }
+                }
+            }
             if root.side-tab == 3 && root.headline != "" && root.head-bw > 0: Rectangle {
                 width: desk.width;
                 height: desk.height;

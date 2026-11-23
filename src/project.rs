@@ -34,7 +34,8 @@ pub struct Project {
     /// volumes switched off (bin mode); new volumes are on
     pub volumes_off: Vec<PathBuf>,
     pub look: serde_json::Value,
-    pub headline: String,
+    /// the words of every text element (their style is in `look`)
+    pub texts: Vec<String>,
     /// master mode: per master file where its film starts and ends ("HH:MM:SS:FF" of the master, "" = no limit)
     pub films: Vec<(PathBuf, (String, String))>,
     /// the cut as read when saved
@@ -87,7 +88,11 @@ struct FileProject {
     chosen: Option<Vec<String>>,
     volumes_off: Vec<PathBuf>,
     look: serde_json::Value,
+    /// one headline (projects before 2026-11-23): read, never written
+    #[serde(default, skip_serializing)]
     headline: String,
+    #[serde(default)]
+    texts: Vec<String>,
     /// one range for all masters (projects before 2026-11-23): read, never written
     #[serde(default, skip_serializing)]
     film: (String, String),
@@ -150,7 +155,8 @@ pub fn save(p: &Project, path: &Path) -> Result<Vec<Still>, String> {
         chosen: p.chosen.clone(),
         volumes_off: p.volumes_off.clone(),
         look: p.look.clone(),
-        headline: p.headline.clone(),
+        headline: String::new(),
+        texts: p.texts.clone(),
         film: Default::default(),
         films: p.films.clone(),
         name: p.name.clone(),
@@ -234,7 +240,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
         chosen: fp.chosen,
         volumes_off: fp.volumes_off,
         look: fp.look,
-        headline: fp.headline,
+        texts: if fp.texts.is_empty() { vec![fp.headline] } else { fp.texts },
         films,
         name: fp.name,
         rate: Rate { num: fp.rate.0.max(1), den: fp.rate.1.max(1) },
@@ -267,7 +273,7 @@ mod tests {
             chosen: Some(vec!["Reel 1".into()]),
             volumes_off: vec![],
             look: serde_json::json!({"margin": "10"}),
-            headline: "Title".into(),
+            texts: vec!["Title".into(), "Second\nline".into()],
             films: vec![("/m.mov".into(), ("01:00:10:00".into(), String::new()))],
             name: "Cut".into(),
             rate: Rate { num: 25, den: 1 },

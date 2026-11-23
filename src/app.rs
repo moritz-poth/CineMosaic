@@ -6,7 +6,7 @@ slint::include_modules!();
 mod mac;
 mod presets;
 mod tc;
-use presets::{PRESETS, apply_preset, load_presets, preset_json, preset_menu, store_presets};
+use presets::{PRESETS, apply_preset, apply_text_style, load_presets, preset_json, preset_menu, store_presets, text_style};
 use tc::{clipboard_text, tc_edit, tc_parts, tc_pasted};
 use mac::color_panel;
 #[cfg(target_os = "macos")]
@@ -58,6 +58,12 @@ struct State {
     carry: Option<Carry>,
     /// headline font a project or preset asked for, by name, until the font list is loaded
     font_wanted: Option<String>,
+    /// text elements of the sheet: words and style (preset keys); the open one is edited in the Text tab's fields
+    /// and written back here before anything reads the list (`store_open`)
+    texts: Vec<(String, serde_json::Value)>,
+    text_open: usize,
+    /// for each text the sheet draws (`Sheet::texts`), its place in `texts`
+    text_index: Vec<usize>,
     /// this window's preview renderer and the generation of its newest job
     renderer: std::cell::OnceCell<(std::sync::mpsc::Sender<RenderJob>, Arc<AtomicUsize>)>,
     gate: Arc<Gate>,
@@ -782,18 +788,27 @@ fn show_palettes(app: &AppWindow, s: &Settings) {
     app.set_bg_palette(swatches(2));
 }
 
-/// Colour of palette `k` (0 frame line, 1 headline, 2 background) as typed.
+/// Colour `k` (0 frame line, 1 text, 2 background, 3 text shadow) as typed.
 fn color_of(app: &AppWindow, k: i32) -> SharedString {
-    [AppWindow::get_line_color, AppWindow::get_head_color, AppWindow::get_bg_color][k.clamp(0, 2) as usize](app)
+    [AppWindow::get_line_color, AppWindow::get_head_color, AppWindow::get_bg_color, AppWindow::get_sh_color][k.clamp(0, 3) as usize](app)
 }
 
 fn set_color(app: &AppWindow, k: i32, v: SharedString) {
-    [AppWindow::set_line_color, AppWindow::set_head_color, AppWindow::set_bg_color][k.clamp(0, 2) as usize](app, v)
+    [AppWindow::set_line_color, AppWindow::set_head_color, AppWindow::set_bg_color, AppWindow::set_sh_color][k.clamp(0, 3) as usize](app, v)
 }
 
-/// The chosen preset of palette `k` (-1: none).
+/// The chosen preset of colour `k` (-1: none).
 fn slot_of(app: &AppWindow, k: i32) -> i32 {
-    [AppWindow::get_line_slot, AppWindow::get_head_slot, AppWindow::get_bg_slot][k.clamp(0, 2) as usize](app)
+    [AppWindow::get_line_slot, AppWindow::get_head_slot, AppWindow::get_bg_slot, AppWindow::get_sh_slot][k.clamp(0, 3) as usize](app)
+}
+
+fn set_slot(app: &AppWindow, k: i32, i: i32) {
+    [AppWindow::set_line_slot, AppWindow::set_head_slot, AppWindow::set_bg_slot, AppWindow::set_sh_slot][k.clamp(0, 3) as usize](app, i)
+}
+
+/// Which presets colour `k` uses: the shadow shares the text's.
+fn palette_of(k: i32) -> usize {
+    [0, 1, 2, 1][k.clamp(0, 3) as usize]
 }
 
 /// The chosen preset follows the colour (a preset or project brings its own): the preset with this colour, or none.
@@ -806,6 +821,7 @@ fn match_slots(app: &AppWindow) {
     app.set_line_slot(slot(app.get_line_palette(), app.get_line_color()));
     app.set_head_slot(slot(app.get_head_palette(), app.get_head_color()));
     app.set_bg_slot(slot(app.get_bg_palette(), app.get_bg_color()));
+    app.set_sh_slot(slot(app.get_head_palette(), app.get_sh_color()));
 }
 
 /// Preset `slot` of palette `k` gets colour `c`; every window shows it. `save`: write the settings now (the colour
@@ -850,37 +866,136 @@ fn read_decor(app: &AppWindow, sheet: &mut layout::Sheet, aspect: f64) -> Result
     } else {
         None
     };
-    let text = app.get_headline().to_string();
-    let head_color = hex_color(&app.get_head_color());
-    if let Some([r, g, b]) = head_color {
-        app.set_head_swatch(slint::Color::from_rgb_u8(r, g, b));
-    }
-    sheet.headline = None;
-    if !text.trim().is_empty() {
-        let size = whole(&app.get_head_size(), "head-size").and_then(|v| if (2.0..=1000.0).contains(&v) { Ok(v) } else { Err("head-size") })?;
-        let color = head_color.ok_or("head-color")?;
-        let family = FONTS.with(|f| f.borrow().get(app.get_font() as usize).cloned());
-        let (bold, italic) = (app.get_head_bold(), app.get_head_italic());
-        let face = family.and_then(|fam| {
-            FACES.with(|c| c.borrow_mut().entry((fam.clone(), bold, italic)).or_insert_with(|| cinemosaic::fonts::face(&fam, bold, italic)).clone())
-        });
-        if let Some(face) = face {
-            let anchor = app.get_head_anchor().clamp(0, 8);
-            let align = [layout::Align::Left, layout::Align::Center, layout::Align::Right][anchor as usize % 3];
-            let valign = [layout::VAlign::Top, layout::VAlign::Middle, layout::VAlign::Bottom][anchor as usize / 3];
-            let dx_mm = length(&app.get_head_dx(), per, -2000.0, 2000.0, "head-dx")?;
-            let dy_mm = length(&app.get_head_dy(), per, -2000.0, 2000.0, "head-dy")?;
-            let pad = |s: SharedString, field| length(&s, per, 0.0, 500.0, field);
-            let pad_mm = [
-                pad(app.get_head_pad_t(), "head-pad-t")?,
-                pad(app.get_head_pad_r(), "head-pad-r")?,
-                pad(app.get_head_pad_b(), "head-pad-b")?,
-                pad(app.get_head_pad_l(), "head-pad-l")?,
-            ];
-            sheet.headline = Some(layout::Headline { text, face, size_pt: size, color, align, valign, dx_mm, dy_mm, pad_mm, wrap: app.get_head_wrap() });
+    let swatch = |c: Option<[u8; 3]>, set: fn(&AppWindow, slint::Color)| {
+        if let Some([r, g, b]) = c {
+            set(app, slint::Color::from_rgb_u8(r, g, b));
+        }
+    };
+    swatch(hex_color(&app.get_head_color()), AppWindow::set_head_swatch);
+    swatch(hex_color(&app.get_sh_color()), AppWindow::set_sh_swatch);
+    let global = whole(&app.get_global_angle(), "global-angle").and_then(|v| if (-360.0..=360.0).contains(&v) { Ok(v) } else { Err("global-angle") })?;
+    store_open(app);
+    let (texts, open) = with_state(app, |st| (st.borrow().texts.clone(), st.borrow().text_open));
+    sheet.texts.clear();
+    let mut index = vec![];
+    for (k, (text, style)) in texts.iter().enumerate() {
+        match text_from(style, text, per, global) {
+            Ok(Some(t)) => {
+                sheet.texts.push(t);
+                index.push(k);
+            }
+            Ok(None) => {}
+            // the open text names its wrong field; a closed one with a wrong value (an odd preset) is left out
+            Err(field) if k == open => return Err(field),
+            Err(_) => {}
         }
     }
+    with_state(app, |st| st.borrow_mut().text_index = index);
     Ok(())
+}
+
+/// One text element from its style (preset keys, values as typed) and words; None = nothing to draw (no words, or
+/// its font cannot be loaded yet); Err = the field that is not usable.
+fn text_from(v: &serde_json::Value, text: &str, per: f64, global_angle: f64) -> Result<Option<layout::Headline>, &'static str> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let b = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+    let i = |k: &str| v.get(k).and_then(|x| x.as_i64()).unwrap_or(0).max(0) as usize;
+    let within = |k: &'static str, lo: f64, hi: f64| whole(&s(k), k).and_then(|x| if (lo..=hi).contains(&x) { Ok(x) } else { Err(k) });
+    let size = within("head-size", 2.0, 1000.0)?;
+    let color = hex_color(&s("head-color")).ok_or("head-color")?;
+    let (bold, italic) = (b("head-bold"), b("head-italic"));
+    let family = s("font");
+    let family = if family.is_empty() { FONTS.with(|f| f.borrow().get(default_font(&f.borrow())).cloned()) } else { Some(family) };
+    let Some(face) = family.and_then(|fam| FACES.with(|c| c.borrow_mut().entry((fam.clone(), bold, italic)).or_insert_with(|| cinemosaic::fonts::face(&fam, bold, italic)).clone())) else {
+        return Ok(None);
+    };
+    let anchor = i("head-anchor").min(8);
+    const H: [layout::Align; 3] = [layout::Align::Left, layout::Align::Center, layout::Align::Right];
+    let pads: Vec<String> = v.get("head-pad").and_then(|x| x.as_array()).map(|a| a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()).unwrap_or_default();
+    let pad = |k: usize, field: &'static str| length(pads.get(k).map_or("24", |p| p.as_str()), per, 0.0, 500.0, field);
+    let shadow = if b("sh-on") {
+        let angle = if b("sh-global") { global_angle } else { within("sh-angle", -360.0, 360.0)? };
+        Some(layout::Shadow {
+            blend: layout::Blend::ALL[i("sh-blend").min(layout::Blend::ALL.len() - 1)],
+            color: hex_color(&s("sh-color")).ok_or("sh-color")?,
+            opacity: within("sh-opacity", 0.0, 100.0)? / 100.0,
+            angle,
+            distance_mm: length(&s("sh-distance"), per, 0.0, 2000.0, "sh-distance")?,
+            spread: within("sh-spread", 0.0, 100.0)? / 100.0,
+            size_mm: length(&s("sh-size"), per, 0.0, 200.0, "sh-size")?,
+            contour: layout::Contour::ALL[i("sh-contour").min(layout::Contour::ALL.len() - 1)],
+            anti_aliased: b("sh-aa"),
+            noise: within("sh-noise", 0.0, 100.0)? / 100.0,
+            knock_out: v.get("sh-knock").and_then(|x| x.as_bool()).unwrap_or(true),
+        })
+    } else {
+        None
+    };
+    Ok(Some(layout::Headline {
+        text: text.to_string(),
+        face,
+        size_pt: size,
+        color,
+        align: H[anchor % 3],
+        valign: [layout::VAlign::Top, layout::VAlign::Middle, layout::VAlign::Bottom][anchor / 3],
+        lines: H[i("head-lines").min(2)],
+        shadow,
+        dx_mm: length(&s("head-dx"), per, -2000.0, 2000.0, "head-dx")?,
+        dy_mm: length(&s("head-dy"), per, -2000.0, 2000.0, "head-dy")?,
+        pad_mm: [pad(0, "head-pad-t")?, pad(1, "head-pad-r")?, pad(2, "head-pad-b")?, pad(3, "head-pad-l")?],
+        wrap: b("head-wrap"),
+    }))
+}
+
+/// The words of every text, the open one as its field shows it now.
+fn text_words(app: &AppWindow) -> Vec<String> {
+    let open = app.get_headline().to_string();
+    with_state(app, |st| {
+        let st = st.borrow();
+        st.texts.iter().enumerate().map(|(k, t)| if k == st.text_open { open.clone() } else { t.0.clone() }).collect()
+    })
+}
+
+/// Writes the Text tab's fields back into the open text.
+fn store_open(app: &AppWindow) {
+    let (text, style) = (app.get_headline().to_string(), text_style(app));
+    with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        let k = st.text_open;
+        if let Some(t) = st.texts.get_mut(k) {
+            *t = (text, style);
+        }
+    });
+}
+
+/// Fills the Text tab's fields from the open text, and the list of texts.
+fn load_open(app: &AppWindow) {
+    let (text, style, k) = with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        if st.texts.is_empty() {
+            st.texts.push((String::new(), serde_json::json!({})));
+        }
+        st.text_open = st.text_open.min(st.texts.len() - 1);
+        let k = st.text_open;
+        (st.texts[k].0.clone(), st.texts[k].1.clone(), k)
+    });
+    app.set_headline(text.into());
+    apply_text_style(app, &style);
+    app.set_text_open(k as i32);
+    show_texts(app);
+}
+
+/// The headers of the text list: the first line of each text ("" = still empty).
+fn show_texts(app: &AppWindow) {
+    let open = app.get_headline().to_string();
+    let titles: Vec<SharedString> = with_state(app, |st| {
+        let st = st.borrow();
+        st.texts.iter().enumerate().map(|(k, t)| if k == st.text_open { &open } else { &t.0 }).map(|t| t.lines().next().unwrap_or("").trim().into()).collect()
+    });
+    app.set_text_titles(ModelRc::new(VecModel::from(titles)));
 }
 
 /// Everything the sheet needs from the fields: sheet with its decoration and the picture format.
@@ -1055,6 +1170,7 @@ fn refresh(app: &AppWindow) {
         }
     };
     app.set_invalid("".into());
+    show_texts(app);
     if app.get_picture() == 0 {
         show_picture(app);
     }
@@ -1089,15 +1205,21 @@ fn refresh(app: &AppWindow) {
         app.set_trim_y((t.y / h as f64) as f32);
         app.set_trim_w((t.w / w as f64) as f32);
         app.set_trim_h((t.h / h as f64) as f32);
-        match plan.text {
-            Some((r, _, _)) => {
-                app.set_head_bx((r.x / w as f64) as f32);
-                app.set_head_by((r.y / h as f64) as f32);
-                app.set_head_bw((r.w / w as f64) as f32);
-                app.set_head_bh((r.h / h as f64) as f32);
+        // every text's box (to click it open), and the open one's for dragging
+        let (index, open, count) = (st.text_index.clone(), st.text_open, st.texts.len());
+        let frac = |r: &layout::Rect| TextBox { x: (r.x / w as f64) as f32, y: (r.y / h as f64) as f32, w: (r.w / w as f64) as f32, h: (r.h / h as f64) as f32 };
+        let mut boxes = vec![TextBox { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }; count];
+        for t in &plan.texts {
+            if let Some(&k) = index.get(t.i).filter(|&&k| k < count) {
+                boxes[k] = frac(&t.rect);
             }
-            None => app.set_head_bw(0.0),
         }
+        let mine = boxes.get(open).cloned().unwrap_or(TextBox { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
+        app.set_head_bx(mine.x);
+        app.set_head_by(mine.y);
+        app.set_head_bw(mine.w);
+        app.set_head_bh(mine.h);
+        app.set_text_boxes(ModelRc::new(VecModel::from(boxes)));
         // zoomed in, the preview is drawn sharper – never finer than the sheet itself, at most 8000 px
         let real = w.max(h) as f64;
         let long = (PREVIEW_PX * app.get_zoom() as f64).min(real).clamp(PREVIEW_PX, 8000.0);
@@ -1805,7 +1927,7 @@ fn adopt_carry(app: &AppWindow, st: &mut State) {
 /// What a project would save, without file places: compared to tell whether there are unsaved changes.
 fn snapshot(app: &AppWindow, st: &State) -> serde_json::Value {
     serde_json::json!({
-        "look": preset_json(app), "headline": app.get_headline().as_str(), "mode": app.get_mode(),
+        "look": preset_json(app), "texts": text_words(app), "mode": app.get_mode(),
         "films": st.masters.iter().map(|m| st.films.get(&m.0).cloned().unwrap_or_default()).collect::<Vec<_>>(),
         "masters": st.masters.iter().map(|m| m.0.clone()).collect::<Vec<_>>(), "lists": st.lists, "detected": st.detected, "bin": st.bin, "sequence": st.seq_on,
         "shots": st.shots.len(), "stills": st.stills.len(), "read": st.stills.values().filter(|r| r.is_ok()).count(),
@@ -1896,7 +2018,7 @@ fn save_project(app: &AppWindow, ask: bool) -> bool {
             chosen: (!st.seq_on.iter().all(|&on| on)).then(|| st.sequence_names.iter().zip(&st.seq_on).filter(|(_, on)| **on).map(|(n, _)| n.clone()).collect()),
             volumes_off: st.volumes.iter().filter(|v| !v.1).map(|v| v.0.clone()).collect(),
             look: preset_json(app),
-            headline: app.get_headline().to_string(),
+            texts: text_words(app),
             films: st.masters.iter().filter_map(|m| Some((m.0.clone(), st.films.get(&m.0)?.clone()))).collect(),
             name: t.name,
             rate: t.rate,
@@ -1954,7 +2076,18 @@ fn open_project(app: &AppWindow, path: PathBuf) {
     };
     log::write(&format!("project opened: {}", file_name(&path)));
     apply_preset(app, &p.look);
-    app.set_headline(p.headline.clone().into());
+    // the project's texts, in the styles its look gave them (a text without one takes the last style)
+    store_open(app);
+    with_state(app, |st| {
+        let mut st = st.borrow_mut();
+        let last = st.texts.last().map(|t| t.1.clone()).unwrap_or_default();
+        st.texts.resize(p.texts.len().max(1), (String::new(), last));
+        for (t, words) in st.texts.iter_mut().zip(&p.texts) {
+            t.0 = words.clone();
+        }
+        st.text_open = 0;
+    });
+    load_open(app);
     app.set_mode(p.mode.clamp(0, 1));
     let name = |o: &Option<PathBuf>| o.as_deref().map(file_name).unwrap_or_default();
 
@@ -2202,6 +2335,8 @@ fn new_window(ctx: &Rc<Ctx>) -> Result<AppWindow, slint::PlatformError> {
     FRONT.with(|f| f.set(app.get_win_id()));
     wire_shared(&app, ctx);
     wire_window(&app, ctx);
+    // one empty text to start with, in the fields' standard style
+    with_state(&app, |st| st.borrow_mut().texts.push((String::new(), text_style(&app))));
     show_palettes(&app, &ctx.settings.borrow());
     match_slots(&app);
     show_fonts(&app);
@@ -2743,9 +2878,9 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         let weak = app.as_weak();
         move |k, i| {
             let Some(app) = weak.upgrade() else { return };
-            let pal = [app.get_line_palette(), app.get_head_palette(), app.get_bg_palette()][k.clamp(0, 2) as usize].clone();
+            let pal = [app.get_line_palette(), app.get_head_palette(), app.get_bg_palette()][palette_of(k)].clone();
             let Some(sw) = slint::Model::row_data(&pal, i as usize) else { return };
-            [AppWindow::set_line_slot, AppWindow::set_head_slot, AppWindow::set_bg_slot][k.clamp(0, 2) as usize](&app, i);
+            set_slot(&app, k, i);
             set_color(&app, k, sw.hex);
             refresh(&app);
         }
@@ -2763,7 +2898,7 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
                 Rc::new(move |c| {
                     let Some(app) = weak.upgrade() else { return };
                     if let Ok(slot) = usize::try_from(slot_of(&app, k)) {
-                        set_palette_entry(&ctx.settings, k as usize, slot, c, false);
+                        set_palette_entry(&ctx.settings, palette_of(k), slot, c, false);
                     }
                     set_color(&app, k, hex_text(c).into());
                     refresh(&app);
@@ -2778,8 +2913,58 @@ fn wire_design(app: &AppWindow, ctx: &Rc<Ctx>) {
         move |k| {
             let Some(app) = weak.upgrade() else { return };
             if let (Some(c), Ok(slot)) = (hex_color(&color_of(&app, k)), usize::try_from(slot_of(&app, k))) {
-                set_palette_entry(&ctx.settings, k as usize, slot, c, true);
+                set_palette_entry(&ctx.settings, palette_of(k), slot, c, true);
             }
+        }
+    });
+    // the list of texts: open one (the fields show it), add one below the open one, remove one
+    app.on_text_open_at({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            store_open(&app);
+            with_state(&app, |st| st.borrow_mut().text_open = i.max(0) as usize);
+            load_open(&app);
+            refresh(&app);
+        }
+    });
+    app.on_text_add({
+        let weak = app.as_weak();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            store_open(&app);
+            // the open text's style, a little lower, so the new one does not lie on top of it
+            let per = mm_per_px(&app);
+            let mut style = text_style(&app);
+            let dy = app.get_head_dy().trim().parse::<i64>().unwrap_or(0) + (12.0 / per).round() as i64;
+            style["head-dy"] = dy.to_string().into();
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                let at = st.text_open + 1;
+                st.texts.insert(at, (String::new(), style));
+                st.text_open = at;
+            });
+            load_open(&app);
+            refresh(&app);
+        }
+    });
+    app.on_text_remove({
+        let weak = app.as_weak();
+        move |i| {
+            let Some(app) = weak.upgrade() else { return };
+            store_open(&app);
+            with_state(&app, |st| {
+                let mut st = st.borrow_mut();
+                let i = i.max(0) as usize;
+                if i < st.texts.len() {
+                    st.texts.remove(i);
+                }
+                if st.text_open > i || st.text_open >= st.texts.len() {
+                    st.text_open = st.text_open.saturating_sub(1);
+                }
+            });
+            load_open(&app);
+            refresh(&app);
         }
     });
     // headline anchor: a sensible move for the new point (inside the sheet), then draw

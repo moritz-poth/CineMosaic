@@ -1,6 +1,7 @@
 //! The sheet: paper size, resolution, margin and gap → a grid of equal cells filled left to right, top to bottom,
 //! centred in its area. Optional: a trim area in the picture format with crop marks, a frame line of parallel
-//! strands, a headline hung at any point of the sheet (where it covers the line, the line breaks). Line, headline and grid keep out of each other's way.
+//! strands, text elements hung at any point of the sheet (where one covers the line, the line breaks), each with an
+//! optional drop shadow as Photoshop's layer style draws it. Line, texts and grid keep out of each other's way.
 
 use crate::fonts::Face;
 use ab_glyph::{Font, PxScale, ScaleFont, point};
@@ -77,6 +78,160 @@ pub enum VAlign {
     Bottom,
 }
 
+/// Blend modes of the drop shadow, as Photoshop names them (Dissolve and the colour modes left out).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Blend {
+    Normal,
+    Darken,
+    Multiply,
+    ColorBurn,
+    LinearBurn,
+    Lighten,
+    Screen,
+    ColorDodge,
+    LinearDodge,
+    Overlay,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
+}
+
+impl Blend {
+    pub const ALL: [Blend; 14] = [
+        Blend::Normal,
+        Blend::Darken,
+        Blend::Multiply,
+        Blend::ColorBurn,
+        Blend::LinearBurn,
+        Blend::Lighten,
+        Blend::Screen,
+        Blend::ColorDodge,
+        Blend::LinearDodge,
+        Blend::Overlay,
+        Blend::SoftLight,
+        Blend::HardLight,
+        Blend::Difference,
+        Blend::Exclusion,
+    ];
+
+    /// One channel: `b` the page below, `c` the shadow colour, both 0–1.
+    fn mix(self, b: f32, c: f32) -> f32 {
+        match self {
+            Blend::Normal => c,
+            Blend::Darken => b.min(c),
+            Blend::Multiply => b * c,
+            Blend::ColorBurn => if c <= 0.0 { 0.0 } else { 1.0 - ((1.0 - b) / c).min(1.0) },
+            Blend::LinearBurn => (b + c - 1.0).max(0.0),
+            Blend::Lighten => b.max(c),
+            Blend::Screen => 1.0 - (1.0 - b) * (1.0 - c),
+            Blend::ColorDodge => if c >= 1.0 { 1.0 } else { (b / (1.0 - c)).min(1.0) },
+            Blend::LinearDodge => (b + c).min(1.0),
+            Blend::Overlay => Blend::HardLight.mix(c, b),
+            Blend::SoftLight => {
+                if c <= 0.5 {
+                    b - (1.0 - 2.0 * c) * b * (1.0 - b)
+                } else {
+                    let d = if b <= 0.25 { ((16.0 * b - 12.0) * b + 4.0) * b } else { b.sqrt() };
+                    b + (2.0 * c - 1.0) * (d - b)
+                }
+            }
+            Blend::HardLight => if c <= 0.5 { 2.0 * b * c } else { 1.0 - 2.0 * (1.0 - b) * (1.0 - c) },
+            Blend::Difference => (b - c).abs(),
+            Blend::Exclusion => b + c - 2.0 * b * c,
+        }
+    }
+}
+
+/// Contour presets of Photoshop's layer style: how the shadow's opacity runs from its edge (0) to its core (1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Contour {
+    Linear,
+    Cone,
+    ConeInverted,
+    Gaussian,
+    HalfRound,
+    Ring,
+    RingDouble,
+    RollingSlope,
+    RoundedSteps,
+    Sawtooth,
+}
+
+impl Contour {
+    pub const ALL: [Contour; 10] = [
+        Contour::Linear,
+        Contour::Cone,
+        Contour::ConeInverted,
+        Contour::Gaussian,
+        Contour::HalfRound,
+        Contour::Ring,
+        Contour::RingDouble,
+        Contour::RollingSlope,
+        Contour::RoundedSteps,
+        Contour::Sawtooth,
+    ];
+
+    fn at(self, x: f32) -> f32 {
+        use std::f32::consts::PI;
+        let y = match self {
+            Contour::Linear => x,
+            Contour::Cone => 1.0 - (1.0 - 2.0 * x).abs(),
+            Contour::ConeInverted => (1.0 - 2.0 * x).abs(),
+            Contour::Gaussian => 0.5 - 0.5 * (PI * x).cos(),
+            Contour::HalfRound => (1.0 - (1.0 - x) * (1.0 - x)).sqrt(),
+            Contour::Ring => (PI * x).sin(),
+            Contour::RingDouble => (2.0 * PI * x).sin().abs(),
+            Contour::RollingSlope => 1.0 - x + 0.25 * (2.0 * PI * x).sin() * x,
+            Contour::RoundedSteps => {
+                let k = x * 4.0;
+                let step = k.floor().min(3.0);
+                let f = k - step;
+                (step + f * f * (3.0 - 2.0 * f)) / 4.0
+            }
+            Contour::Sawtooth => (x * 2.0).fract() * 0.5 + x * 0.5,
+        };
+        y.clamp(0.0, 1.0)
+    }
+
+    /// 256 steps; anti-aliased smooths the curve (like the checkbox beside Photoshop's contour).
+    fn table(self, anti_aliased: bool) -> [f32; 256] {
+        let mut t = [0.0f32; 256];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = self.at(i as f32 / 255.0);
+        }
+        if anti_aliased {
+            let c = t;
+            for i in 0..256usize {
+                let (a, b) = (i.saturating_sub(3), (i + 3).min(255));
+                t[i] = c[a..=b].iter().sum::<f32>() / (b - a + 1) as f32;
+            }
+        }
+        t
+    }
+}
+
+/// Drop shadow like Photoshop's layer style. Lengths in mm of the sheet (the UI shows px), fractions 0–1.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shadow {
+    pub blend: Blend,
+    pub color: [u8; 3],
+    pub opacity: f64,
+    /// where the light comes from, degrees counter-clockwise from the right (120 = from the upper left: the shadow
+    /// falls to the lower right)
+    pub angle: f64,
+    pub distance_mm: f64,
+    /// how much of the size hardens the edge (Photoshop's Spread)
+    pub spread: f64,
+    pub size_mm: f64,
+    pub contour: Contour,
+    pub anti_aliased: bool,
+    pub noise: f64,
+    /// the text hides its own shadow (Layer Knocks Out Drop Shadow); only matters with blend modes that lighten
+    pub knock_out: bool,
+}
+
+/// One text element of the sheet (the headline of earlier versions); several lines with \n.
 #[derive(Clone, Debug)]
 pub struct Headline {
     pub text: String,
@@ -86,6 +241,9 @@ pub struct Headline {
     /// the point of the sheet (and of the text box) it hangs at: e.g. top centre = the middle of the top edge
     pub align: Align,
     pub valign: VAlign,
+    /// the lines inside the text box
+    pub lines: Align,
+    pub shadow: Option<Shadow>,
     /// moved from that point, right and down positive
     pub dx_mm: f64,
     pub dy_mm: f64,
@@ -107,14 +265,14 @@ pub struct Sheet {
     /// trim area of this width / height inside the paper, with crop marks at its corners
     pub trim: Option<f64>,
     pub line: Option<Line>,
-    pub headline: Option<Headline>,
+    pub texts: Vec<Headline>,
     /// colour of the page behind the stills; with crop marks it fills the trim area plus 3 mm bleed
     pub background: [u8; 3],
 }
 
 impl Default for Sheet {
     fn default() -> Self {
-        Sheet { width_mm: 297.0, height_mm: 210.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, trim: None, line: None, headline: None, background: [255, 255, 255] }
+        Sheet { width_mm: 297.0, height_mm: 210.0, dpi: 300.0, margin_mm: 10.0, gap_mm: 3.0, columns: None, trim: None, line: None, texts: vec![], background: [255, 255, 255] }
     }
 }
 
@@ -135,11 +293,20 @@ pub struct Plan {
     pub area: Rect,
     /// the line's outer rectangle and thickness
     pub line: Option<(Rect, f64)>,
-    /// the headline's box (x, top, width, height), its baseline and pixel scale
-    pub text: Option<(Rect, f64, PxScale)>,
+    /// every text with something in it, in the order of `Sheet::texts`
+    pub texts: Vec<Placed>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Where a text goes: its box, each line's start and baseline, the pixel scale; `i` = index in `Sheet::texts`.
+#[derive(Clone, Debug)]
+pub struct Placed {
+    pub i: usize,
+    pub rect: Rect,
+    pub lines: Vec<(f64, f64)>,
+    pub scale: PxScale,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Grid {
     pub cols: u32,
     pub rows: u32,
@@ -149,8 +316,8 @@ pub struct Grid {
     pub x: f64,
     pub y: f64,
     pub gap: f64,
-    /// cells touching this stay empty (the headline with its space, when the stills flow around it)
-    pub keep_out: Option<Rect>,
+    /// cells touching these stay empty (texts with their space, when the stills flow around them)
+    pub keep_out: Vec<Rect>,
 }
 
 /// Pixel scale for a size in points at `dpi`: points are em sizes, ab_glyph scales by the font's height.
@@ -201,12 +368,15 @@ impl Sheet {
             let (i, t) = (self.px(l.inset_mm), self.px(l.width_mm).max(1.0));
             (Rect { x: trim.x + i, y: trim.y + i, w: (trim.w - 2.0 * i).max(1.0), h: (trim.h - 2.0 * i).max(1.0) }, t)
         });
-        let text = self.headline.as_ref().filter(|hl| !hl.text.trim().is_empty()).map(|hl| {
+        let texts: Vec<Placed> = self.texts.iter().enumerate().filter(|(_, hl)| !hl.text.trim().is_empty()).map(|(i, hl)| {
             let scale = scale_for(&hl.face, hl.size_pt, self.dpi);
             let sf = (*hl.face.font).as_scaled(scale);
             let (ascent, descent) = (sf.ascent() as f64, sf.descent() as f64);
-            let tw = text_width(&hl.face, &hl.text, scale);
-            let th = ascent - descent;
+            let step = ascent - descent + sf.line_gap() as f64;
+            let rows: Vec<&str> = hl.text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+            let widths: Vec<f64> = rows.iter().map(|l| text_width(&hl.face, l, scale)).collect();
+            let tw = widths.iter().copied().fold(0.0, f64::max);
+            let th = ascent - descent + step * (rows.len() - 1) as f64;
             // the anchor point of the sheet, and the same point of the text box on it
             let fx = match hl.align {
                 Align::Left => 0.0,
@@ -220,8 +390,14 @@ impl Sheet {
             };
             let x = trim.x + trim.w * fx - tw * fx + self.px(hl.dx_mm);
             let top = trim.y + trim.h * fy - th * fy + self.px(hl.dy_mm);
-            (Rect { x, y: top, w: tw, h: th }, top + ascent, scale)
-        });
+            let lf = match hl.lines {
+                Align::Left => 0.0,
+                Align::Center => 0.5,
+                Align::Right => 1.0,
+            };
+            let lines = widths.iter().enumerate().map(|(k, lw)| (x + (tw - lw) * lf, top + ascent + step * k as f64)).collect();
+            Placed { i, rect: Rect { x, y: top, w: tw, h: th }, lines, scale }
+        }).collect();
         // the stills keep inside the line and clear of a headline at the top or bottom
         let m = self.px(self.margin_mm);
         let clear = self.px(CLEARANCE);
@@ -230,12 +406,13 @@ impl Sheet {
             let need = r.x - trim.x + t * l.pattern.extent() + clear;
             inset.iter_mut().for_each(|i| *i = i.max(need));
         }
-        if let (Some((r, _, _)), Some(hl)) = (&text, &self.headline) {
-            // the stills keep the headline's space below / above it
+        for t in &texts {
+            let (r, hl) = (&t.rect, &self.texts[t.i]);
+            // the stills keep a text's space below / above it
             match hl.valign {
                 VAlign::Top if r.y + r.h < trim.y + trim.h / 2.0 => inset[0] = inset[0].max(r.y + r.h - trim.y + self.px(hl.pad_mm[2])),
                 VAlign::Bottom if r.y > trim.y + trim.h / 2.0 => inset[2] = inset[2].max(trim.y + trim.h - r.y + self.px(hl.pad_mm[0])),
-                _ => {} // in the middle the headline lies over the stills
+                _ => {} // in the middle a text lies over the stills
             }
         }
         let area = Rect {
@@ -244,7 +421,7 @@ impl Sheet {
             w: (trim.w - inset[1] - inset[3]).max(1.0),
             h: (trim.h - inset[0] - inset[2]).max(1.0),
         };
-        Plan { trim, area, line, text }
+        Plan { trim, area, line, texts }
     }
 
     /// Grid for `n` stills of width/height `aspect`.
@@ -253,19 +430,21 @@ impl Sheet {
         let area = plan.area;
         let n = n.max(1) as u32;
         let g = self.px(self.gap_mm);
-        // the stills flow around the headline: its box with the space around it stays free
-        let keep_out = match (&plan.text, &self.headline) {
-            (Some((r, _, _)), Some(hl)) if hl.wrap => {
-                let [t, rt, b, l] = hl.pad_mm.map(|v| self.px(v));
-                Some(Rect { x: r.x - l, y: r.y - t, w: r.w + l + rt, h: r.h + t + b })
-            }
-            _ => None,
-        };
+        // the stills flow around texts that say so: their boxes with the space around them stay free
+        let keep_out: Vec<Rect> = plan
+            .texts
+            .iter()
+            .filter(|t| self.texts[t.i].wrap)
+            .map(|t| {
+                let (r, [top, rt, b, l]) = (t.rect, self.texts[t.i].pad_mm.map(|v| self.px(v)));
+                Rect { x: r.x - l, y: r.y - top, w: r.w + l + rt, h: r.h + top + b }
+            })
+            .collect();
         let place = |cols: u32, rows: u32| {
             let cw = ((area.w - (cols - 1) as f64 * g) / cols as f64).min((area.h - (rows - 1) as f64 * g) / rows as f64 * aspect).max(0.0);
             let ch = cw / aspect;
             let (bw, bh) = (cols as f64 * cw + (cols - 1) as f64 * g, rows as f64 * ch + (rows - 1) as f64 * g);
-            Grid { cols, rows, cell_w: cw, cell_h: ch, x: area.x + (area.w - bw) / 2.0, y: area.y + (area.h - bh) / 2.0, gap: g, keep_out }
+            Grid { cols, rows, cell_w: cw, cell_h: ch, x: area.x + (area.w - bw) / 2.0, y: area.y + (area.h - bh) / 2.0, gap: g, keep_out: keep_out.clone() }
         };
         // as many rows as the stills need beside the cells the headline takes (a few more rows can free a cell)
         let fit = |cols: u32| {
@@ -291,14 +470,13 @@ impl Sheet {
 impl Grid {
     /// Whether grid position `k` (row by row) is free for a still.
     fn free(&self, k: u32) -> bool {
-        let Some(o) = self.keep_out else { return true };
         let (c, r) = (k % self.cols, k / self.cols);
         let x = self.x + c as f64 * (self.cell_w + self.gap);
         let y = self.y + r as f64 * (self.cell_h + self.gap);
-        !(x < o.x + o.w && o.x < x + self.cell_w && y < o.y + o.h && o.y < y + self.cell_h)
+        !self.keep_out.iter().any(|o| x < o.x + o.w && o.x < x + self.cell_w && y < o.y + o.h && o.y < y + self.cell_h)
     }
 
-    /// How many stills the grid holds (its cells less those the headline keeps free).
+    /// How many stills the grid holds (its cells less those the texts keep free).
     pub fn slots(&self) -> usize {
         (0..self.cols * self.rows).filter(|&k| self.free(k)).count()
     }
@@ -306,7 +484,7 @@ impl Grid {
     /// Cell of still `i` as whole pixels (x, y, w, h): the `i`-th free grid position. Neighbouring cells share their
     /// edge pixel when the gap is 0. x and y can be below 0: with a negative margin the stills run off the page.
     pub fn cell(&self, i: usize) -> (i64, i64, u32, u32) {
-        let k = if self.keep_out.is_some() { (0..).filter(|&k| self.free(k)).nth(i).unwrap_or(i as u32) } else { i as u32 };
+        let k = if !self.keep_out.is_empty() { (0..).filter(|&k| self.free(k)).nth(i).unwrap_or(i as u32) } else { i as u32 };
         let (c, r) = (k % self.cols, k / self.cols);
         let x = self.x + c as f64 * (self.cell_w + self.gap);
         let y = self.y + r as f64 * (self.cell_h + self.gap);
@@ -399,56 +577,205 @@ fn fill(page: &mut RgbImage, x0: f64, y0: f64, x1: f64, y1: f64, color: [u8; 3])
     }
 }
 
-/// Fills `r` but leaves out where it meets `hole` (a horizontal edge loses a stretch of its length, a vertical
-/// edge a stretch of its height).
-fn fill_except(page: &mut RgbImage, r: Rect, hole: Option<Rect>, color: [u8; 3]) {
-    let meets = hole.filter(|h| h.x < r.x + r.w && r.x < h.x + h.w && h.y < r.y + r.h && r.y < h.y + h.h);
-    match meets {
-        None => fill(page, r.x, r.y, r.x + r.w, r.y + r.h, color),
-        Some(h) if r.w >= r.h => {
-            fill(page, r.x, r.y, h.x.max(r.x), r.y + r.h, color);
-            fill(page, (h.x + h.w).min(r.x + r.w), r.y, r.x + r.w, r.y + r.h, color);
+/// Fills `r` but leaves out where it meets one of `holes` (a horizontal edge loses stretches of its length, a
+/// vertical edge stretches of its height).
+fn fill_except(page: &mut RgbImage, r: Rect, holes: &[Rect], color: [u8; 3]) {
+    let across = r.w >= r.h;
+    let (start, end) = if across { (r.x, r.x + r.w) } else { (r.y, r.y + r.h) };
+    let mut gaps: Vec<(f64, f64)> = holes
+        .iter()
+        .filter(|h| h.x < r.x + r.w && r.x < h.x + h.w && h.y < r.y + r.h && r.y < h.y + h.h)
+        .map(|h| if across { (h.x, h.x + h.w) } else { (h.y, h.y + h.h) })
+        .collect();
+    gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut at = start;
+    for (g0, g1) in gaps.into_iter().chain([(end, end)]) {
+        let to = g0.min(end);
+        if to > at {
+            if across { fill(page, at, r.y, to, r.y + r.h, color) } else { fill(page, r.x, at, r.x + r.w, to, color) }
         }
-        Some(h) => {
-            fill(page, r.x, r.y, r.x + r.w, h.y.max(r.y), color);
-            fill(page, r.x, (h.y + h.h).min(r.y + r.h), r.x + r.w, r.y + r.h, color);
+        at = at.max(g1);
+    }
+}
+
+/// Coverage of a text (0–1 per pixel) in a buffer whose top left is (`x0`, `y0`) on the page.
+struct Mask {
+    x0: i64,
+    y0: i64,
+    w: usize,
+    h: usize,
+    a: Vec<f32>,
+}
+
+impl Mask {
+    fn get(&self, x: i64, y: i64) -> f32 {
+        let (x, y) = (x - self.x0, y - self.y0);
+        if x < 0 || y < 0 || x as usize >= self.w || y as usize >= self.h { 0.0 } else { self.a[y as usize * self.w + x as usize] }
+    }
+}
+
+/// The lines of a text as coverage, with `room` px free around them (for the shadow to spread into); fake bold
+/// widens the strokes, fake italic slants.
+fn text_mask(hl: &Headline, t: &Placed, room: f64) -> Mask {
+    let font = &*hl.face.font;
+    let scale = t.scale;
+    let sf = font.as_scaled(scale);
+    let bold_steps = if hl.face.fake_bold { (scale.y / 28.0).ceil().max(1.0) as i64 } else { 0 };
+    let slant = if hl.face.fake_italic { 0.2 } else { 0.0 };
+    // glyphs can reach a little beyond the box (accents, italics, overhangs)
+    let pad = room + scale.y as f64 * 0.5 + bold_steps as f64;
+    let (x0, y0) = ((t.rect.x - pad).floor() as i64, (t.rect.y - pad).floor() as i64);
+    let (w, h) = ((t.rect.w + 2.0 * pad).ceil() as usize + 1, (t.rect.h + 2.0 * pad).ceil() as usize + 1);
+    let mut m = Mask { x0, y0, w, h, a: vec![0.0; w * h] };
+    for (line, &(x, baseline)) in hl.text.split('\n').map(|l| l.trim_end_matches('\r')).zip(&t.lines) {
+        let mut caret = x as f32;
+        let mut prev = None;
+        for c in line.chars() {
+            let id = sf.glyph_id(c);
+            if let Some(p) = prev {
+                caret += sf.kern(p, id);
+            }
+            let glyph = id.with_scale_and_position(scale, point(caret, baseline as f32));
+            caret += sf.h_advance(id);
+            prev = Some(id);
+            let Some(outline) = font.outline_glyph(glyph) else { continue };
+            let b = outline.px_bounds();
+            outline.draw(|gx, gy, coverage| {
+                let py = b.min.y as i64 + gy as i64;
+                let shift = (slant * (baseline as f32 - py as f32)).round() as i64;
+                for dx in 0..=bold_steps {
+                    let (mx, my) = (b.min.x as i64 + gx as i64 + shift + dx - x0, py - y0);
+                    if mx >= 0 && my >= 0 && (mx as usize) < w && (my as usize) < h {
+                        let v = &mut m.a[my as usize * w + mx as usize];
+                        *v = v.max(coverage);
+                    }
+                }
+            });
+        }
+    }
+    m
+}
+
+/// Box blur of radius `r` along rows (`horizontal`) or columns, in place.
+fn box_blur(a: &mut [f32], w: usize, h: usize, r: usize, horizontal: bool) {
+    if r == 0 {
+        return;
+    }
+    let (n, lines) = if horizontal { (w, h) } else { (h, w) };
+    let idx = |line: usize, k: usize| if horizontal { line * w + k } else { k * w + line };
+    let mut buf = vec![0.0f32; n];
+    let norm = 1.0 / (2 * r + 1) as f32;
+    for line in 0..lines {
+        let mut sum = 0.0f32;
+        for k in 0..=r.min(n - 1) {
+            sum += a[idx(line, k)];
+        }
+        for k in 0..n {
+            buf[k] = sum * norm;
+            if k + r + 1 < n {
+                sum += a[idx(line, k + r + 1)];
+            }
+            if k >= r {
+                sum -= a[idx(line, k - r)];
+            }
+        }
+        for k in 0..n {
+            a[idx(line, k)] = buf[k];
         }
     }
 }
 
-/// The text with its baseline at `baseline`, starting at `x`; fake bold widens the strokes, fake italic slants.
-fn draw_text(page: &mut RgbImage, hl: &Headline, x: f64, baseline: f64, scale: PxScale) {
-    let font = &*hl.face.font;
-    let sf = font.as_scaled(scale);
-    let bold_steps = if hl.face.fake_bold { (scale.y / 28.0).ceil().max(1.0) as i32 } else { 0 };
-    let slant = if hl.face.fake_italic { 0.2 } else { 0.0 };
-    let (w, h) = page.dimensions();
-    let mut caret = x as f32;
-    let mut prev = None;
-    for c in hl.text.chars() {
-        let id = sf.glyph_id(c);
-        if let Some(p) = prev {
-            caret += sf.kern(p, id);
-        }
-        let glyph = id.with_scale_and_position(scale, point(caret, baseline as f32));
-        caret += sf.h_advance(id);
-        prev = Some(id);
-        let Some(outline) = font.outline_glyph(glyph) else { continue };
-        let b = outline.px_bounds();
-        outline.draw(|gx, gy, coverage| {
-            let py = b.min.y as i32 + gy as i32;
-            let shift = (slant * (baseline as f32 - py as f32)).round() as i32;
-            for dx in 0..=bold_steps {
-                let px = b.min.x as i32 + gx as i32 + shift + dx;
-                if px < 0 || py < 0 || px as u32 >= w || py as u32 >= h {
-                    continue;
-                }
-                let p = page.get_pixel_mut(px as u32, py as u32);
-                for k in 0..3 {
-                    p[k] = (p[k] as f32 * (1.0 - coverage) + hl.color[k] as f32 * coverage).round() as u8;
-                }
+/// Square dilation of radius `r` (Photoshop's Spread hardens the shadow by growing it before the blur).
+fn dilate(a: &mut [f32], w: usize, h: usize, r: usize) {
+    if r == 0 {
+        return;
+    }
+    for horizontal in [true, false] {
+        let (n, lines) = if horizontal { (w, h) } else { (h, w) };
+        let idx = |line: usize, k: usize| if horizontal { line * w + k } else { k * w + line };
+        let mut buf = vec![0.0f32; n];
+        for line in 0..lines {
+            for k in 0..n {
+                buf[k] = (k.saturating_sub(r)..=(k + r).min(n - 1)).map(|j| a[idx(line, j)]).fold(0.0, f32::max);
             }
-        });
+            for k in 0..n {
+                a[idx(line, k)] = buf[k];
+            }
+        }
+    }
+}
+
+/// The drop shadow of a text: the coverage grown by spread, blurred to its size, shaped by the contour, roughened
+/// by noise, then mixed into the page with its blend mode and opacity, moved by the distance away from the light.
+fn draw_shadow(page: &mut RgbImage, sheet: &Sheet, text: &Mask, sh: &Shadow) {
+    let size = sheet.px(sh.size_mm).max(0.0);
+    let choke = (size * sh.spread.clamp(0.0, 1.0)).round() as usize;
+    let blur = size * (1.0 - sh.spread.clamp(0.0, 1.0));
+    let mut a = text.a.clone();
+    dilate(&mut a, text.w, text.h, choke);
+    // three box passes are close to a Gaussian; together they reach `blur` px out
+    let r = (blur / 3.0).round() as usize;
+    for _ in 0..3 {
+        box_blur(&mut a, text.w, text.h, r, true);
+        box_blur(&mut a, text.w, text.h, r, false);
+    }
+    let lut = sh.contour.table(sh.anti_aliased);
+    let rad = sh.angle.to_radians();
+    let d = sheet.px(sh.distance_mm);
+    let (ox, oy) = ((-rad.cos() * d).round() as i64, (rad.sin() * d).round() as i64);
+    let (pw, ph) = page.dimensions();
+    let c = sh.color.map(|v| v as f32 / 255.0);
+    for my in 0..text.h {
+        for mx in 0..text.w {
+            let v = a[my * text.w + mx];
+            if v <= 0.0 {
+                continue;
+            }
+            let (px, py) = (text.x0 + mx as i64 + ox, text.y0 + my as i64 + oy);
+            if px < 0 || py < 0 || px >= pw as i64 || py >= ph as i64 {
+                continue;
+            }
+            let mut alpha = lut[(v.clamp(0.0, 1.0) * 255.0).round() as usize] * sh.opacity as f32;
+            if sh.noise > 0.0 {
+                // a fixed pattern per pixel, so the preview does not flicker
+                let hsh = ((px as u64).wrapping_mul(73856093) ^ (py as u64).wrapping_mul(19349663)).wrapping_mul(0x9E3779B97F4A7C15) >> 40;
+                alpha *= 1.0 - sh.noise as f32 * (hsh as f32 / (1u64 << 24) as f32);
+            }
+            if sh.knock_out {
+                alpha *= 1.0 - text.get(px, py);
+            }
+            if alpha <= 0.0 {
+                continue;
+            }
+            let p = page.get_pixel_mut(px as u32, py as u32);
+            for k in 0..3 {
+                let b = p[k] as f32 / 255.0;
+                p[k] = ((b + (sh.blend.mix(b, c[k]) - b) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+}
+
+/// A text (and its shadow, under it) on the page.
+fn draw_text(page: &mut RgbImage, sheet: &Sheet, hl: &Headline, t: &Placed) {
+    let room = hl.shadow.as_ref().map_or(0.0, |s| sheet.px(s.size_mm) + 2.0);
+    let m = text_mask(hl, t, room);
+    if let Some(sh) = &hl.shadow {
+        draw_shadow(page, sheet, &m, sh);
+    }
+    let (pw, ph) = page.dimensions();
+    for my in 0..m.h {
+        for mx in 0..m.w {
+            let cov = m.a[my * m.w + mx];
+            let (px, py) = (m.x0 + mx as i64, m.y0 + my as i64);
+            if cov <= 0.0 || px < 0 || py < 0 || px >= pw as i64 || py >= ph as i64 {
+                continue;
+            }
+            let p = page.get_pixel_mut(px as u32, py as u32);
+            for k in 0..3 {
+                p[k] = (p[k] as f32 * (1.0 - cov) + hl.color[k] as f32 * cov).round() as u8;
+            }
+        }
     }
 }
 
@@ -495,11 +822,9 @@ fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32
         imageops::overlay(&mut page, &tile, x, y);
     }
     if let (Some((outer, t)), Some(l)) = (plan.line, &sheet.line) {
-        // the headline cuts a gap into every strand it covers
-        let hole = plan.text.map(|(tr, _, _)| {
-            let p = sheet.px(BREAK_PAD);
-            Rect { x: tr.x - p, y: tr.y - p, w: tr.w + 2.0 * p, h: tr.h + 2.0 * p }
-        });
+        // every text cuts a gap into every strand it covers
+        let p = sheet.px(BREAK_PAD);
+        let holes: Vec<Rect> = plan.texts.iter().map(|t| Rect { x: t.rect.x - p, y: t.rect.y - p, w: t.rect.w + 2.0 * p, h: t.rect.h + 2.0 * p }).collect();
         for (off, width) in l.pattern.strands() {
             let (o, sw) = (off * t, (width * t).max(1.0));
             let r = Rect { x: outer.x + o, y: outer.y + o, w: outer.w - 2.0 * o, h: outer.h - 2.0 * o };
@@ -512,12 +837,12 @@ fn compose(sheet: &Sheet, n: usize, grid: &Grid, mut tile: impl FnMut(usize, u32
                 Rect { x: r.x, y: r.y, w: sw, h: r.h },
                 Rect { x: r.x + r.w - sw, y: r.y, w: sw, h: r.h },
             ] {
-                fill_except(&mut page, edge, hole, l.color);
+                fill_except(&mut page, edge, &holes, l.color);
             }
         }
     }
-    if let (Some((tr, baseline, scale)), Some(hl)) = (plan.text, &sheet.headline) {
-        draw_text(&mut page, hl, tr.x, baseline, scale);
+    for t in &plan.texts {
+        draw_text(&mut page, sheet, &sheet.texts[t.i], t);
     }
     if sheet.trim.is_some() {
         let r = plan.trim;
@@ -621,12 +946,12 @@ mod tests {
     #[test]
     fn headline_hangs_at_its_anchor_and_breaks_only_a_line_it_covers() {
         let Some(face) = face() else { return }; // no fonts (not on a Mac)
-        let hl = |dy: f64| Headline { text: "Rough Cut 3".into(), face: face.clone(), size_pt: 24.0, color: [200, 0, 0], align: Align::Center, valign: VAlign::Top, dx_mm: 0.0, dy_mm: dy, pad_mm: [2.0; 4], wrap: false };
+        let hl = |dy: f64| Headline { text: "Rough Cut 3".into(), face: face.clone(), size_pt: 24.0, color: [200, 0, 0], align: Align::Center, valign: VAlign::Top, lines: Align::Center, shadow: None, dx_mm: 0.0, dy_mm: dy, pad_mm: [2.0; 4], wrap: false };
         let line = Line { width_mm: 0.5, inset_mm: 8.0, color: [0, 0, 0], pattern: Pattern::Single };
         // 20 mm down from the middle of the top edge: below the line, the line stays whole
-        let s = Sheet { margin_mm: 5.0, line: Some(line.clone()), headline: Some(hl(20.0)), ..a4(None) };
+        let s = Sheet { margin_mm: 5.0, line: Some(line.clone()), texts: vec![hl(20.0)], ..a4(None) };
         let p = s.plan();
-        let (tr, _, _) = p.text.unwrap();
+        let tr = p.texts[0].rect;
         assert!((tr.y - 200.0).abs() < 1e-6);
         assert!((tr.x + tr.w / 2.0 - 1050.0).abs() < 1e-6);
         assert!(p.area.y >= tr.y + tr.h, "stills below the headline");
@@ -635,15 +960,15 @@ mod tests {
         // moved onto the line: the line breaks under the text
         let mut s2 = s.clone();
         // centre the text on the line (82.5 px = 8.25 mm; 10 px per mm)
-        s2.headline = Some(hl((82.5 - tr.h / 2.0) / 10.0));
-        let (tr2, _, _) = s2.plan().text.unwrap();
+        s2.texts = vec![hl((82.5 - tr.h / 2.0) / 10.0)];
+        let tr2 = s2.plan().texts[0].rect;
         assert!(tr2.y < 82.0 && tr2.y + tr2.h > 82.0);
         let page = render(&s2, 0, 1.0, |_| None);
         assert_eq!(page.get_pixel((tr2.x - 10.0) as u32, 82), &Rgb([255, 255, 255]), "gap before the text");
         assert_eq!(page.get_pixel(200, 82), &Rgb([0, 0, 0]), "line goes on beside it");
         // the space below a top headline keeps the stills away
         let mut s3 = s.clone();
-        s3.headline = Some(Headline { pad_mm: [0.0, 0.0, 30.0, 0.0], ..hl(20.0) });
+        s3.texts = vec![Headline { pad_mm: [0.0, 0.0, 30.0, 0.0], ..hl(20.0) }];
         assert!(s3.plan().area.y >= tr.y + tr.h + 300.0 - 1e-6);
     }
 
@@ -657,16 +982,18 @@ mod tests {
             color: [0, 0, 0],
             align: Align::Center,
             valign: VAlign::Middle,
+            lines: Align::Center,
+            shadow: None,
             dx_mm: 0.0,
             dy_mm: 0.0,
             pad_mm: [3.0; 4],
             wrap: true,
         };
-        let s = Sheet { headline: Some(hl.clone()), ..a4(Some(3)) };
+        let s = Sheet { texts: vec![hl.clone()], ..a4(Some(3)) };
         let g = s.grid(12, 16.0 / 9.0);
         // the middle cells are kept free, so the grid has more rows and still holds all 12
         assert!(g.rows > 4 && g.slots() >= 12, "{g:?}");
-        let (r, _, _) = s.plan().text.unwrap();
+        let r = s.plan().texts[0].rect;
         let o = Rect { x: r.x - 30.0, y: r.y - 30.0, w: r.w + 60.0, h: r.h + 60.0 };
         for i in 0..12 {
             let (x, y, w, h) = g.cell(i);
@@ -674,8 +1001,92 @@ mod tests {
             assert!(!(x < o.x + o.w && o.x < x + w && y < o.y + o.h && o.y < y + h), "still {i} under the headline");
         }
         // without flowing the stills lie under it, in the usual 3 × 4
-        let plain = Sheet { headline: Some(Headline { wrap: false, ..hl }), ..a4(Some(3)) };
+        let plain = Sheet { texts: vec![Headline { wrap: false, ..hl }], ..a4(Some(3)) };
         assert_eq!(plain.grid(12, 16.0 / 9.0).rows, 4);
+    }
+
+    #[test]
+    fn several_texts_of_several_lines_each_break_the_line() {
+        let Some(face) = face() else { return };
+        let t = |text: &str, align: Align, lines: Align| Headline {
+            text: text.into(),
+            face: face.clone(),
+            size_pt: 20.0,
+            color: [0, 0, 0],
+            align,
+            valign: VAlign::Top,
+            lines,
+            shadow: None,
+            dx_mm: 0.0,
+            dy_mm: 6.0,
+            pad_mm: [2.0; 4],
+            wrap: false,
+        };
+        let line = Line { width_mm: 0.5, inset_mm: 8.0, color: [0, 0, 0], pattern: Pattern::Single };
+        let s = Sheet { line: Some(line), texts: vec![t("Left", Align::Left, Align::Left), t("Wide first line\nB", Align::Right, Align::Right), t("", Align::Center, Align::Center)], ..a4(None) };
+        let p = s.plan();
+        // the empty one is left out, the others keep their index
+        assert_eq!(p.texts.iter().map(|t| t.i).collect::<Vec<_>>(), vec![0, 1]);
+        let two = &p.texts[1];
+        assert_eq!(two.lines.len(), 2);
+        assert!(two.lines[1].1 > two.lines[0].1, "second line below the first");
+        // right aligned: the short line starts further right, both end at the box edge
+        assert!(two.lines[1].0 > two.lines[0].0);
+        let page = render(&s, 0, 1.0, |_| None);
+        // the line (at 82–87 px) breaks under both texts and goes on between them
+        let y = 84;
+        for t in &p.texts {
+            assert_eq!(page.get_pixel((t.rect.x - 5.0) as u32, y), &Rgb([255, 255, 255]), "gap at text {}", t.i);
+        }
+        assert_eq!(page.get_pixel(1050, y), &Rgb([0, 0, 0]), "line between the texts");
+    }
+
+    #[test]
+    fn drop_shadow_falls_away_from_the_light() {
+        let Some(face) = face() else { return };
+        let sh = Shadow {
+            blend: Blend::Multiply,
+            color: [0, 0, 0],
+            opacity: 1.0,
+            angle: 120.0,
+            distance_mm: 3.0,
+            spread: 1.0,
+            size_mm: 0.0,
+            contour: Contour::Linear,
+            anti_aliased: false,
+            noise: 0.0,
+            knock_out: true,
+        };
+        let t = Headline {
+            text: "I".into(),
+            face,
+            size_pt: 60.0,
+            color: [255, 255, 255],
+            align: Align::Center,
+            valign: VAlign::Middle,
+            lines: Align::Center,
+            shadow: Some(sh.clone()),
+            dx_mm: 0.0,
+            dy_mm: 0.0,
+            pad_mm: [0.0; 4],
+            wrap: false,
+        };
+        let s = Sheet { background: [200, 200, 200], texts: vec![t.clone()], ..a4(None) };
+        let page = render(&s, 0, 1.0, |_| None);
+        let p = s.plan();
+        let (r, baseline) = (p.texts[0].rect, p.texts[0].lines[0].1);
+        // 120°: 30 px away = 15 px right, 26 px down; below the foot of the white I (its baseline) lies its black shadow
+        let (cx, foot) = ((r.x + r.w / 2.0) as u32, baseline as u32);
+        let dark = (foot + 2..foot + 24).filter(|&y| page.get_pixel(cx + 15, y)[0] < 50).count();
+        assert!(dark > 15, "shadow below and right of the text: {dark}");
+        assert!((foot + 30..foot + 40).all(|y| page.get_pixel(cx + 15, y)[0] == 200), "and not further down");
+        // Screen with a black shadow changes nothing; a blur spreads it beyond the hard edge
+        let none = Sheet { texts: vec![Headline { shadow: Some(Shadow { blend: Blend::Screen, ..sh.clone() }), ..t.clone() }], ..s.clone() };
+        assert!(render(&none, 0, 1.0, |_| None).pixels().all(|p| p[0] >= 200 || p[0] == p[1]));
+        assert_eq!(Blend::Multiply.mix(0.5, 0.5), 0.25);
+        assert!((Blend::Screen.mix(0.5, 0.5) - 0.75).abs() < 1e-6);
+        assert_eq!(Contour::Linear.table(false)[255], 1.0);
+        assert!(Contour::Cone.table(false)[128] > 0.98 && Contour::Cone.table(false)[0] == 0.0);
     }
 
     #[test]

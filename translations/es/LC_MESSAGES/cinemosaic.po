@@ -419,6 +419,141 @@ msgstr "Suelta archivos máster y listas de montaje"
 msgid "Videos become master files; EDL, XML, FCPXML and AAF become cut lists."
 msgstr "Los vídeos se convierten en archivos máster; EDL, XML, FCPXML y AAF en listas de montaje."
 
+msgid "Text"
+msgstr "Texto"
+
+msgid "Text {}"
+msgstr "Texto {}"
+
+msgid "Add text"
+msgstr "Añadir texto"
+
+msgid "Text – Return starts a new line"
+msgstr "Texto – Intro empieza una línea nueva"
+
+msgid "Lines"
+msgstr "Líneas"
+
+msgid "Left"
+msgstr "Izquierda"
+
+msgid "Centred"
+msgstr "Centradas"
+
+msgid "Right"
+msgstr "Derecha"
+
+msgid "Drop shadow"
+msgstr "Sombra paralela"
+
+msgid "Blend mode"
+msgstr "Modo de fusión"
+
+msgid "Normal"
+msgstr "Normal"
+
+msgid "Darken"
+msgstr "Oscurecer"
+
+msgid "Multiply"
+msgstr "Multiplicar"
+
+msgid "Color Burn"
+msgstr "Subexponer color"
+
+msgid "Linear Burn"
+msgstr "Subexposición lineal"
+
+msgid "Lighten"
+msgstr "Aclarar"
+
+msgid "Screen"
+msgstr "Trama"
+
+msgid "Color Dodge"
+msgstr "Sobreexponer color"
+
+msgid "Linear Dodge (Add)"
+msgstr "Sobreexposición lineal (añadir)"
+
+msgid "Overlay"
+msgstr "Superponer"
+
+msgid "Soft Light"
+msgstr "Luz suave"
+
+msgid "Hard Light"
+msgstr "Luz fuerte"
+
+msgid "Difference"
+msgstr "Diferencia"
+
+msgid "Exclusion"
+msgstr "Exclusión"
+
+msgid "Opacity"
+msgstr "Opacidad"
+
+msgid "Angle"
+msgstr "Ángulo"
+
+msgid "Use global light"
+msgstr "Usar luz global"
+
+msgid "Distance"
+msgstr "Distancia"
+
+msgid "Spread"
+msgstr "Extensión"
+
+msgid "Shadow size"
+msgstr "Tamaño de la sombra"
+
+msgid "Contour"
+msgstr "Contorno"
+
+msgid "Linear"
+msgstr "Lineal"
+
+msgid "Cone"
+msgstr "Cono"
+
+msgid "Cone – Inverted"
+msgstr "Cono invertido"
+
+msgid "Gaussian"
+msgstr "Gaussiana"
+
+msgid "Half Round"
+msgstr "Semicírculo"
+
+msgid "Ring"
+msgstr "Anillo"
+
+msgid "Ring – Double"
+msgstr "Anillo doble"
+
+msgid "Rolling Slope – Descending"
+msgstr "Pendiente ondulada descendente"
+
+msgid "Rounded Steps"
+msgstr "Escalones redondeados"
+
+msgid "Sawtooth 1"
+msgstr "Diente de sierra 1"
+
+msgid "Anti-aliased"
+msgstr "Suavizado"
+
+msgid "Noise"
+msgstr "Ruido"
+
+msgid "Text knocks out drop shadow"
+msgstr "El texto elimina la sombra paralela"
+
+msgid "As in Photoshop’s layer style: the angle is where the light comes from, the shadow falls the other way. With Use global light every text that has it on shares one angle. Spread hardens the edge, Size softens it, the contour shapes how it fades, noise roughens it."
+msgstr "Como en el estilo de capa de Photoshop: el ángulo es la dirección de la que viene la luz, la sombra cae hacia el lado contrario. Con «Usar luz global», todos los textos que lo tienen activado comparten un ángulo. Extensión endurece el borde, Tamaño lo suaviza, el contorno da forma a cómo se desvanece, el ruido lo vuelve granulado."
+
 msgid "Background"
 msgstr "Fondo"
 
@@ -446,8 +581,8 @@ msgstr "Cuadrícula"
 msgid "Grid every"
 msgstr "Cuadrícula cada"
 
-msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the headline frame turn green when the middle of the text lies on a grid line."
-msgstr "La cuadrícula solo se ve en la vista previa, no se exporta. Cubre la página, o la zona dentro de las marcas de corte; las líneas más marcadas son su centro. Las pequeñas marcas del marco del título se vuelven verdes cuando el centro del texto está sobre una línea de la cuadrícula."
+msgid "The grid is only shown in the preview, it is not exported. It covers the page, or the area inside the crop marks; the stronger lines are its middle. The small ticks on the frame of the open text turn green when its middle lies on a grid line."
+msgstr "La cuadrícula solo se ve en la vista previa, no se exporta. Cubre la página, o la zona dentro de las marcas de corte; las líneas más marcadas son su centro. Las pequeñas marcas del marco del texto abierto se vuelven verdes cuando su centro está sobre una línea de la cuadrícula."
 
 msgid "Space above · below"
 msgstr "Espacio arriba · abajo"
@@ -467,11 +602,11 @@ msgstr "Espacio izquierda"
 msgid "Space right"
 msgstr "Espacio derecha"
 
-msgid "Stills around the headline"
-msgstr "Fotogramas alrededor del título"
+msgid "Stills around the text"
+msgstr "Fotogramas alrededor del texto"
 
-msgid "The space is what the stills keep from the headline. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the headline, leave its place free and go on in the next cells."
-msgstr "El espacio es lo que los fotogramas dejan libre alrededor del título. Arriba o abajo quedan debajo o encima; sobre los fotogramas quedan debajo de él – o, con Fotogramas alrededor del título, dejan libre su sitio y siguen en las celdas siguientes."
+msgid "The space is what the stills keep from the text. At the top or bottom they stay below or above it; over the stills they lie under it – or, with Stills around the text, leave its place free and go on in the next cells."
+msgstr "El espacio es lo que los fotogramas dejan libre alrededor del texto. Arriba o abajo quedan debajo o encima; sobre los fotogramas quedan debajo de él – o, con Fotogramas alrededor del texto, dejan libre su sitio y siguen en las celdas siguientes."
 
 msgid "Crop marks"
 msgstr "Marcas de corte"
@@ -490,12 +625,6 @@ msgstr "Distancia al borde"
 
 msgid "Colour"
 msgstr "Color"
-
-msgid "Headline"
-msgstr "Título"
-
-msgid "Headline (empty = none)"
-msgstr "Título (vacío = ninguno)"
 
 msgid "Font"
 msgstr "Fuente"
@@ -566,8 +695,8 @@ msgstr "Mover a la derecha"
 msgid "Move down"
 msgstr "Mover hacia abajo"
 
-msgid "The anchor is the point of the sheet the headline hangs at; X and Y move it from there. You can also drag it in the preview. Where it covers the frame line, the line breaks."
-msgstr "El ancla es el punto de la hoja del que cuelga el título; X e Y lo mueven desde ahí. También puedes arrastrarlo en la vista previa. Donde cubre la línea de marco, la línea se interrumpe."
+msgid "The anchor is the point of the sheet the text hangs at; X and Y move it from there. You can also drag it in the preview; a click on another text there opens that one. Where a text covers the frame line, the line breaks."
+msgstr "El ancla es el punto de la hoja del que cuelga el texto; X e Y lo mueven desde ahí. También puedes arrastrarlo en la vista previa; un clic en otro texto allí lo abre. Donde un texto cubre la línea de marco, la línea se interrumpe."
 
 msgid "Drag left or right in a field to change the value; click to type it."
 msgstr "Arrastra a la izquierda o a la derecha en un campo para cambiar el valor; haz clic para escribirlo."
