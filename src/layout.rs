@@ -231,6 +231,14 @@ pub struct Shadow {
     pub knock_out: bool,
 }
 
+impl Shadow {
+    /// How far the shadow lies from the text in px: away from the light.
+    fn offset(&self, sheet: &Sheet) -> (i64, i64) {
+        let (rad, d) = (self.angle.to_radians(), sheet.px(self.distance_mm));
+        ((-rad.cos() * d).round() as i64, (rad.sin() * d).round() as i64)
+    }
+}
+
 /// One text element of the sheet (the headline of earlier versions); several lines with \n.
 #[derive(Clone, Debug)]
 pub struct Headline {
@@ -615,9 +623,10 @@ impl Mask {
 }
 
 /// The lines of a text as coverage, with `room` px free around them (for the shadow to spread into); fake bold
-/// widens the strokes, fake italic slants. Clipped to the page of `page` px plus `room`, so a huge or far-off text
-/// (an odd project file) never needs more than about a page of memory.
-fn text_mask(hl: &Headline, t: &Placed, room: f64, page: (u32, u32)) -> Mask {
+/// widens the strokes, fake italic slants. Clipped to what can reach the page of `page` px: the page itself and the
+/// page moved back by the shadow's `shift` (at most a page each way), plus `room`; so a huge or far-off text (an odd
+/// project file) never needs more than a few pages of memory.
+fn text_mask(hl: &Headline, t: &Placed, room: f64, page: (u32, u32), shift: (i64, i64)) -> Mask {
     let font = &*hl.face.font;
     let scale = t.scale;
     let sf = font.as_scaled(scale);
@@ -625,9 +634,13 @@ fn text_mask(hl: &Headline, t: &Placed, room: f64, page: (u32, u32)) -> Mask {
     let slant = if hl.face.fake_italic { 0.2 } else { 0.0 };
     // glyphs can reach a little beyond the box (accents, italics, overhangs)
     let pad = room + scale.y as f64 * 0.5 + bold_steps as f64;
-    let clip = |lo: f64, hi: f64, size: u32| (lo.max(-room).floor() as i64, hi.min(size as f64 + room).ceil() as i64);
-    let (x0, x1) = clip(t.rect.x - pad, t.rect.x + t.rect.w + pad, page.0);
-    let (y0, y1) = clip(t.rect.y - pad, t.rect.y + t.rect.h + pad, page.1);
+    let clip = |lo: f64, hi: f64, size: u32, s: i64| {
+        let s = s.clamp(-(size as i64), size as i64) as f64;
+        let (from, to) = (0f64.min(-s) - room, (size as f64).max(size as f64 - s) + room);
+        (lo.max(from).floor() as i64, hi.min(to).ceil() as i64)
+    };
+    let (x0, x1) = clip(t.rect.x - pad, t.rect.x + t.rect.w + pad, page.0, shift.0);
+    let (y0, y1) = clip(t.rect.y - pad, t.rect.y + t.rect.h + pad, page.1, shift.1);
     let (w, h) = ((x1 - x0).max(0) as usize + 1, (y1 - y0).max(0) as usize + 1);
     let mut m = Mask { x0, y0, w, h, a: vec![0.0; w * h] };
     for (line, &(x, baseline)) in hl.text.split('\n').map(|l| l.trim_end_matches('\r')).zip(&t.lines) {
@@ -739,9 +752,7 @@ fn draw_shadow(page: &mut RgbImage, sheet: &Sheet, text: &Mask, sh: &Shadow) {
         box_blur(&mut a, text.w, text.h, r, false);
     }
     let lut = sh.contour.table(sh.anti_aliased);
-    let rad = sh.angle.to_radians();
-    let d = sheet.px(sh.distance_mm);
-    let (ox, oy) = ((-rad.cos() * d).round() as i64, (rad.sin() * d).round() as i64);
+    let (ox, oy) = sh.offset(sheet);
     let (pw, ph) = page.dimensions();
     let c = sh.color.map(|v| v as f32 / 255.0);
     for my in 0..text.h {
@@ -777,9 +788,10 @@ fn draw_shadow(page: &mut RgbImage, sheet: &Sheet, text: &Mask, sh: &Shadow) {
 
 /// A text (and its shadow, under it) on the page.
 fn draw_text(page: &mut RgbImage, sheet: &Sheet, hl: &Headline, t: &Placed) {
-    // room for the shadow to spread, and to reach in from beyond the page edge by its distance
-    let room = hl.shadow.as_ref().map_or(0.0, |s| sheet.px(s.size_mm) + sheet.px(s.distance_mm) + 2.0);
-    let m = text_mask(hl, t, room, page.dimensions());
+    // room for the shadow to spread; its offset is allowed for by the clip
+    let room = hl.shadow.as_ref().map_or(0.0, |s| sheet.px(s.size_mm) + 2.0);
+    let shift = hl.shadow.as_ref().map_or((0, 0), |s| s.offset(sheet));
+    let m = text_mask(hl, t, room, page.dimensions(), shift);
     if let Some(sh) = &hl.shadow {
         draw_shadow(page, sheet, &m, sh);
     }
